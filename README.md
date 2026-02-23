@@ -434,7 +434,7 @@ Ethos uses the [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) for d
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Apache 2.0 — see [LICENSE](LICENSE).
 
 ---
 
