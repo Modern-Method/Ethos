@@ -1,0 +1,48 @@
+[service]
+socket_path = "/tmp/ethos.sock"
+log_level = "info"
+
+[database]
+url = "postgresql://ethos:your_password_here@localhost:5432/ethos"
+max_connections = 10
+
+[embedding]
+backend = "gemini"
+gemini_model = "gemini-embedding-001"
+gemini_dimensions = 768
+onnx_model = "all-MiniLM-L6-v2"
+onnx_dimensions = 384
+batch_size = 32
+batch_timeout_seconds = 5
+queue_capacity = 1000
+rate_limit_rpm = 15
+
+[consolidation]
+interval_minutes = 15
+idle_threshold_seconds = 60
+cpu_threshold_percent = 80
+importance_threshold = 0.8
+repetition_threshold = 3
+retrieval_threshold = 5
+
+[retrieval]
+decay_factor = 0.15
+spreading_strength = 0.85
+iterations = 3
+anchor_top_k_episodes = 10
+anchor_top_k_facts = 10
+weight_similarity = 0.5
+weight_activation = 0.3
+weight_structural = 0.2
+confidence_gate = 0.12
+
+[decay]
+base_tau_days = 7.0
+ltp_multiplier = 1.5
+frequency_weight = 0.3
+emotional_weight = 0.2
+prune_threshold = 0.05
+
+[conflict_resolution]
+auto_supersede_confidence_delta = 0.15
+review_inbox = "~/.openclaw/shared/inbox/memory-review.md"

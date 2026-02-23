@@ -1,0 +1,13 @@
+[advisories]
+
+# RUSTSEC-2023-0071: Marvin Attack timing side-channel in `rsa` crate
+# Status: IGNORED — not applicable
+# Reason: `rsa 0.9.10` appears in Cargo.lock as a stale transitive entry via
+#   sqlx-mysql, but sqlx-mysql is NOT in our active dependency tree
+#   (we use sqlx with default-features=false, postgres-only).
+#   `cargo tree -i rsa` and `cargo tree -i sqlx-mysql` both return empty.
+#   The rsa crate is never compiled into our binaries.
+#   No fix is available upstream; this advisory can be safely ignored for
+#   our use case. Re-evaluate if we ever add MySQL support.
+# Date ignored: 2026-02-22
+ignore = ["RUSTSEC-2023-0071"]

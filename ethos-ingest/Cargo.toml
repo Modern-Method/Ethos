@@ -1,0 +1,16 @@
+[package]
+name = "ethos-ingest"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ethos-core = { path = "../ethos-core" }
+tokio.workspace = true
+sqlx.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true

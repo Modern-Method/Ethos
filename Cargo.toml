@@ -1,0 +1,68 @@
+[workspace]
+members = ["ethos-core", "ethos-server", "ethos-ingest"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Modern Method Inc."]
+license = "UNLICENSED"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Database
+# default-features = false removes mysql/sqlite backends (eliminates rsa RUSTSEC-2023-0071 via sqlx-mysql)
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json", "macros"] }
+
+# pgvector extension for sqlx
+pgvector = { version = "0.4", features = ["sqlx", "serde"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rmp-serde = "1"           # MessagePack for IPC
+
+# Config
+config = { version = "0.14", features = ["toml"] }
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+
+# CLI arg parsing
+clap = { version = "4", features = ["derive"] }
+
+# Async stream utilities
+futures = "0.3"
+
+# Byte buffer utilities
+bytes = "1"
+
+# HTTP client for embeddings API
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+# Async retry with backoff
+tokio-retry = "0.3"
+
+# CPU count for idle detection
+num_cpus = "1"
+
+# Shell expansion for review inbox paths
+shellexpand = "3"
+
+# Regular expressions for fact extraction
+regex = "1"
+
+# Python FFI (for spreading activation — Phase 1, feature-gated)
+# pyo3 = { version = "0.21", features = ["auto-initialize"] }

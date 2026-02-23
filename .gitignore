@@ -1,0 +1,35 @@
+# Rust build artifacts
+target/
+Cargo.lock
+
+# Secrets — never commit
+.env
+*.env.local
+
+# Config with sensitive values (commit ethos.toml.example, not ethos.toml)
+ethos.toml
+
+# Node
+node_modules/
+dist/
+coverage/
+
+# Logs
+*.log
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+/tmp/ethos-test.sock
+
+# Tarpaulin coverage output
+tarpaulin-report.html
+cobertura.xml
