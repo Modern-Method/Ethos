@@ -10,6 +10,8 @@ pub struct EthosConfig {
     pub retrieval: RetrievalConfig,
     pub decay: DecayConfig,
     pub conflict_resolution: ConflictResolutionConfig,
+    #[serde(default)]
+    pub http: HttpConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -86,6 +88,23 @@ pub struct DecayConfig {
 pub struct ConflictResolutionConfig {
     pub auto_supersede_confidence_delta: f64,
     pub review_inbox: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct HttpConfig {
+    pub enabled: bool,
+    pub host: String,
+    pub port: u16,
+}
+
+impl Default for HttpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            host: "127.0.0.1".to_string(),
+            port: 8766,
+        }
+    }
 }
 
 impl EthosConfig {

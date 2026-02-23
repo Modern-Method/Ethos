@@ -46,3 +46,8 @@ prune_threshold = 0.05
 [conflict_resolution]
 auto_supersede_confidence_delta = 0.15
 review_inbox = "~/.openclaw/shared/inbox/memory-review.md"
+
+[http]
+enabled = true
+host = "127.0.0.1"
+port = 8766

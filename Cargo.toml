@@ -1,5 +1,5 @@
 [workspace]
-members = ["ethos-core", "ethos-server", "ethos-ingest"]
+members = ["ethos-core", "ethos-server", "ethos-ingest", "ethos-cli"]
 resolver = "2"
 
 [workspace.package]

@@ -96,6 +96,20 @@ async fn main() -> anyhow::Result<()> {
         .await;
     });
 
+    // Spawn HTTP REST API server (Story 011) if enabled
+    if config.http.enabled {
+        let http_pool = pool.clone();
+        let http_config = config.clone();
+        let http_shutdown = tx.subscribe();
+        tokio::spawn(async move {
+            if let Err(e) =
+                ethos_server::http::start_http_server(http_pool, http_config, http_shutdown).await
+            {
+                tracing::error!("HTTP server error: {}", e);
+            }
+        });
+    }
+
     let socket_path = config.service.socket_path.clone();
     server::run_unix_server(&socket_path, pool, config, tx.subscribe()).await?;
 

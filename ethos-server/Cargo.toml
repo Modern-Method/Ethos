@@ -37,5 +37,8 @@ num_cpus.workspace = true
 shellexpand.workspace = true
 regex.workspace = true
 
+axum = "0.7"
+
 [dev-dependencies]
 wiremock = "0.6"
+tower = { version = "0.4", features = ["util"] }

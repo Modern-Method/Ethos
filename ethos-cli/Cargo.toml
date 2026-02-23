@@ -1,0 +1,16 @@
+[package]
+name = "ethos-cli"
+version = "1.0.0"
+edition = "2021"
+description = "Ethos CLI — QMD wire-protocol-compatible frontend for Ethos semantic memory search"
+
+[[bin]]
+name = "ethos-cli"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
