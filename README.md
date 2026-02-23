@@ -415,7 +415,7 @@ cargo fmt --check
 | 008 | Spreading activation (graph traversal) | ✅ Done |
 | 009 | Consolidation engine (episodic → semantic) | ✅ Done |
 | 010 | Ebbinghaus decay + LTP | ✅ Done |
-| 011 | REST API + QMD wire protocol (memory_search integration) | 🔜 Next |
+| 011 | REST API + QMD wire protocol (memory_search integration) | ✅ Done |
 | 012 | ONNX embedding fallback (offline mode) | 📋 Planned |
 
 ---
