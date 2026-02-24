@@ -96,6 +96,24 @@ async fn main() -> anyhow::Result<()> {
         .await;
     });
 
+    // Spawn re-embed backfill worker (Story 013)
+    match ethos_server::subsystems::embedder::create_backend_from_config(&config) {
+        Ok(backend) => {
+            let reembed_pool = pool.clone();
+            let reembed_config = config.embedding.clone();
+            let reembed_backend: std::sync::Arc<dyn ethos_core::embeddings::EmbeddingBackend> =
+                std::sync::Arc::from(backend);
+            tokio::spawn(ethos_server::subsystems::reembed::run_reembed_worker(
+                reembed_pool,
+                reembed_backend,
+                reembed_config,
+            ));
+        }
+        Err(e) => {
+            tracing::warn!("Re-embed worker skipped: failed to create embedding backend: {}", e);
+        }
+    }
+
     // Spawn HTTP REST API server (Story 011) if enabled
     if config.http.enabled {
         let http_pool = pool.clone();

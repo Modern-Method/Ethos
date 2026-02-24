@@ -6,7 +6,7 @@
 //! - Hebbian strengthening: `weight = min(1.0, old_weight + 0.1)`
 
 use anyhow::Result;
-use ethos_core::embeddings::GeminiEmbeddingClient;
+use ethos_core::embeddings::EmbeddingBackend;
 use pgvector::Vector;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -38,7 +38,7 @@ pub async fn link_memory(
     pool: &PgPool,
     source_type: &str,
     source_id: Uuid,
-    _client: &GeminiEmbeddingClient,
+    _backend: &dyn EmbeddingBackend,
 ) -> Result<usize> {
     // Get the embedding for the new memory
     let vector_row: Option<(Vec<f32>,)> = sqlx::query_as(

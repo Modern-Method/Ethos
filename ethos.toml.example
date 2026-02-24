@@ -7,15 +7,32 @@ url = "postgresql://ethos:your_password_here@localhost:5432/ethos"
 max_connections = 10
 
 [embedding]
+# Options: "gemini" | "onnx" | "gemini-fallback-onnx"
+#   gemini              — cloud embeddings via Gemini API (768-dim, requires GOOGLE_API_KEY)
+#   onnx                — local embeddings via all-MiniLM-L6-v2 (384-dim, fully offline)
+#   gemini-fallback-onnx — Gemini primary; on failure stores NULL embedding (keyword search still works)
 backend = "gemini"
+
+# Gemini settings (used when backend includes "gemini")
 gemini_model = "gemini-embedding-001"
 gemini_dimensions = 768
-onnx_model = "all-MiniLM-L6-v2"
+
+# ONNX settings (used when backend = "onnx")
+# Empty string → defaults to ~/.local/share/ethos/models/all-MiniLM-L6-v2.onnx
+# Run scripts/download-onnx-model.sh to fetch the model.
+onnx_model_path = ""
 onnx_dimensions = 384
+
+# Shared
 batch_size = 32
 batch_timeout_seconds = 5
 queue_capacity = 1000
 rate_limit_rpm = 15
+
+# Re-embed backfill worker (Story 013)
+reembed_interval_minutes = 10   # How often to scan for NULL embeddings
+reembed_batch_size = 50         # Records per tick
+reembed_enabled = true          # Set false to disable entirely
 
 [consolidation]
 interval_minutes = 15

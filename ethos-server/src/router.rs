@@ -45,7 +45,6 @@ pub async fn handle_request_with_config(
             }
         }
         EthosRequest::Consolidate { session, reason } => {
-            // Get config for consolidation
             let (consolidation_config, conflict_config, decay_config) = match config {
                 Some(c) => (
                     c.consolidation.clone(),
@@ -79,7 +78,6 @@ pub async fn handle_request_with_config(
             }
         }
         EthosRequest::Embed { id } => {
-            // Manual embed trigger
             match handle_embed_request(id, pool, config.as_ref()).await {
                 Ok(_) => EthosResponse::ok(serde_json::json!({"embedded": true, "id": id})),
                 Err(e) => EthosResponse::err(e.to_string()),
@@ -102,11 +100,9 @@ async fn handle_embed_request(
         }
     };
 
-    let embedder_config = embedder::EmbedderConfig::from(config);
-    let client = embedder::create_client(&embedder_config)?;
-    
-    embedder::embed_by_id(id, pool, &client).await?;
-    
+    let backend = embedder::create_backend_from_config(config)?;
+    embedder::embed_by_id(id, pool, backend.as_ref()).await?;
+
     Ok(())
 }
 
@@ -128,16 +124,16 @@ async fn handle_search_request(
         }
     };
 
-    let embedder_config = embedder::EmbedderConfig::from(config);
-    let client = embedder::create_client(&embedder_config)?;
-    
+    let backend = embedder::create_backend_from_config(config)?;
+
     let result = retrieve::search_memory(
         query,
         limit,
         use_spreading,
         pool,
-        &client,
+        backend.as_ref(),
         &config.retrieval,
-    ).await?;
+    )
+    .await?;
     Ok(result)
 }
