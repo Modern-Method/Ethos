@@ -423,13 +423,35 @@ cargo fmt --check
 
 ## Contributing
 
-Ethos uses the [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) for development — spec first, then implementation, then review.
+We welcome contributions — but we hold PRs to a high standard. Please read these requirements before opening one.
 
-1. Read the story spec in `docs/stories/`
-2. Write tests first (TDD)
-3. Implement to make tests pass — target 90% coverage
-4. Run `cargo fmt` + `cargo clippy -- -D warnings`
-5. Open a PR with a runbook in `docs/runbooks/`
+### Rules
+
+1. **Open an issue first.** Discuss the change before writing code. PRs without a linked issue will be closed.
+2. **One thing per PR.** Bug fixes, features, and refactors are separate PRs. No bundling.
+3. **Tests are not optional.** All new code requires tests. Coverage must not drop below 90%. Run `cargo tarpaulin` and include the output in your PR.
+4. **Clippy must pass clean.** Run `cargo clippy -- -D warnings` before submitting. We don't merge code with warnings.
+5. **Format your code.** Run `cargo fmt --check` before submitting.
+6. **No breaking changes to the IPC protocol without a migration path.** Ethos is integrated into live systems. If you change message formats, include a versioning strategy.
+7. **Fill out the PR template.** Incomplete PR descriptions will be closed without review.
+
+### What We Won't Merge
+
+- PRs that add dependencies without a clear justification (keep the binary lean)
+- Anything that introduces `unsafe` without a documented, unavoidable reason
+- New features without documentation
+- Changes to the embedding dimension without a migration for existing vectors
+
+### Getting Started
+
+```bash
+git clone https://github.com/Modern-Method/Ethos.git
+cd ethos
+cargo build
+cargo test
+```
+
+Check `docs/stories/` to understand how features are specced and `docs/runbooks/` for operational context.
 
 ---
 
