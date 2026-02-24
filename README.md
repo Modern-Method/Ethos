@@ -416,7 +416,8 @@ cargo fmt --check
 | 009 | Consolidation engine (episodic → semantic) | ✅ Done |
 | 010 | Ebbinghaus decay + LTP | ✅ Done |
 | 011 | REST API + QMD wire protocol (memory_search integration) | ✅ Done |
-| 012 | ONNX embedding fallback (offline mode) | 📋 Planned |
+| 012 | ONNX embedding fallback (offline mode) | ✅ Done |
+| 013 | Re-embed backfill worker (auto-heal NULL embeddings) | ✅ Done |
 
 ---
 
