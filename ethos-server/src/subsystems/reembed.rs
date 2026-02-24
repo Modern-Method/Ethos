@@ -30,7 +30,13 @@ pub async fn run_reembed_worker(
         return;
     }
 
-    let tick_secs = config.reembed_interval_minutes * 60;
+    let interval_min = if config.reembed_interval_minutes == 0 {
+        tracing::warn!("reembed_interval_minutes is 0 — defaulting to 10 minutes");
+        10u64
+    } else {
+        config.reembed_interval_minutes
+    };
+    let tick_secs = interval_min * 60;
     let mut ticker = interval(Duration::from_secs(tick_secs));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -104,9 +110,15 @@ pub async fn run_reembed_tick(
                 apply_rate_limit(config).await;
             }
             Ok(None) => {
-                // Backend still in fallback mode — stop the batch
-                tracing::debug!("Backend returned None during backfill — stopping batch");
-                skipped += rows.len() - embedded;
+                // Backend still in fallback mode — stop the batch.
+                // Only count rows fetched but not yet embedded as skipped
+                // (embedded already counted above; +1 for this row).
+                let remaining = rows.len() - embedded - skipped;
+                tracing::debug!(
+                    remaining,
+                    "Backend returned None during backfill — stopping batch"
+                );
+                skipped += remaining;
                 return Ok((embedded, skipped));
             }
             Err(e) => {

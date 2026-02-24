@@ -9,7 +9,7 @@
 -- NOT applied automatically by `sqlx migrate run`.
 -- Apply manually: sqlx migrate run --target-version 20260224000000
 
-ALTER TABLE episodic_memories
+ALTER TABLE episodic_traces
   ALTER COLUMN embedding TYPE vector(384);
 
 ALTER TABLE semantic_facts

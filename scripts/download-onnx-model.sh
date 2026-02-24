@@ -12,10 +12,10 @@ mkdir -p "$MODEL_DIR"
 BASE="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main"
 
 echo "Downloading ONNX model (~22MB)..."
-curl -L "$BASE/onnx/model.onnx" -o "$MODEL_DIR/all-MiniLM-L6-v2.onnx"
+curl --fail --show-error -L "$BASE/onnx/model.onnx" -o "$MODEL_DIR/all-MiniLM-L6-v2.onnx"
 
 echo "Downloading tokenizer..."
-curl -L "$BASE/tokenizer.json" -o "$MODEL_DIR/all-MiniLM-L6-v2-tokenizer.json"
+curl --fail --show-error -L "$BASE/tokenizer.json" -o "$MODEL_DIR/all-MiniLM-L6-v2-tokenizer.json"
 
 echo ""
 echo "Done. Files saved to: $MODEL_DIR"

@@ -184,9 +184,8 @@ pub async fn embed_all_pending(
                 }
             }
             Ok(None) => {
-                // Fallback: no embedding produced — skip
+                // Fallback: no embedding produced — skip (not a success)
                 tracing::info!(id = %row.id, "No embedding available, skipping");
-                success_count += 1;
             }
             Err(e) => {
                 tracing::error!(id = %row.id, error = %e, "Failed to embed content");

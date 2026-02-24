@@ -403,7 +403,7 @@ impl EmbeddingBackend for FallbackEmbeddingClient {
     }
 
     fn dimensions(&self) -> usize {
-        GEMINI_DIMENSIONS
+        self.inner.dimensions()
     }
 
     fn name(&self) -> &str {

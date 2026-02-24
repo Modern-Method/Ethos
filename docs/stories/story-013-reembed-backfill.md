@@ -32,7 +32,7 @@ It runs on a **configurable timer** (default: every 10 minutes). Event-based tri
 ### What It Does Per Tick
 
 ```
-1. Count NULL-embedding rows in episodic_memories + semantic_facts
+1. Count NULL-embedding rows in episodic_traces + semantic_facts
 2. If count == 0: log "no nulls, skip" and sleep until next tick
 3. If backend unavailable: log "backend not ready, skip" and sleep
 4. Fetch a batch of NULL-embedding rows (configurable batch size, default 50)
@@ -54,7 +54,7 @@ Use the existing `rate_limit_rpm` config field — don't add new config.
 
 | Table | Column to check | Column to update |
 |-------|----------------|-----------------|
-| `episodic_memories` | `embedding IS NULL` | `embedding` |
+| `episodic_traces` | `embedding IS NULL` | `embedding` |
 | `semantic_facts` | `embedding IS NULL` | `embedding` |
 
 Process episodic first (more recent, higher retrieval value), then semantic.
@@ -132,13 +132,14 @@ async fn run_reembed_tick(
     backend: Arc<dyn EmbeddingBackend>,
     config: &EmbeddingConfig,
 ) -> Result<(usize, usize)> {
-    let null_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM episodic_memories WHERE embedding IS NULL
-         UNION ALL
-         SELECT COUNT(*) FROM semantic_facts WHERE embedding IS NULL"
+    let null_count: Option<i64> = sqlx::query_scalar(
+        "SELECT
+           (SELECT COUNT(*) FROM episodic_traces WHERE embedding IS NULL)
+         + (SELECT COUNT(*) FROM semantic_facts WHERE embedding IS NULL)"
     )
     .fetch_one(pool)
     .await?;
+    let null_count = null_count.unwrap_or(0);
 
     if null_count == 0 {
         return Ok((0, 0));
@@ -151,7 +152,7 @@ async fn run_reembed_tick(
 
     // Process episodic memories first
     let episodes = sqlx::query!(
-        "SELECT id, content FROM episodic_memories 
+        "SELECT id, content FROM episodic_traces 
          WHERE embedding IS NULL 
          ORDER BY created_at DESC 
          LIMIT $1",
@@ -165,7 +166,7 @@ async fn run_reembed_tick(
             Some(vec) => {
                 let pgvec = pgvector::Vector::from(vec);
                 sqlx::query!(
-                    "UPDATE episodic_memories SET embedding = $1 WHERE id = $2",
+                    "UPDATE episodic_traces SET embedding = $1 WHERE id = $2",
                     pgvec as _,
                     row.id
                 )
