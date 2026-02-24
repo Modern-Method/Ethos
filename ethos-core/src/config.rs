@@ -28,15 +28,36 @@ pub struct DatabaseConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct EmbeddingConfig {
+    /// Backend selector: "gemini" | "onnx" | "gemini-fallback-onnx"
     pub backend: String,
     pub gemini_model: String,
     pub gemini_dimensions: u32,
-    pub onnx_model: String,
+    /// Path to the ONNX model file. Empty string → default
+    /// (`~/.local/share/ethos/models/all-MiniLM-L6-v2.onnx`)
+    #[serde(default)]
+    pub onnx_model_path: String,
     pub onnx_dimensions: u32,
     pub batch_size: u32,
     pub batch_timeout_seconds: u64,
     pub queue_capacity: u32,
     pub rate_limit_rpm: u32,
+
+    #[serde(default = "default_reembed_interval")]
+    pub reembed_interval_minutes: u64,
+    #[serde(default = "default_reembed_batch_size")]
+    pub reembed_batch_size: usize,
+    #[serde(default = "default_reembed_enabled")]
+    pub reembed_enabled: bool,
+}
+
+fn default_reembed_interval() -> u64 {
+    10
+}
+fn default_reembed_batch_size() -> usize {
+    50
+}
+fn default_reembed_enabled() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize, Clone)]

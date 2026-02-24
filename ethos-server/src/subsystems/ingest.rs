@@ -23,7 +23,7 @@ pub async fn ingest_payload_with_embedding(
         .ok_or_else(|| anyhow::anyhow!("Missing 'source'"))?;
 
     let metadata = payload["metadata"].as_object();
-    
+
     let session_id = metadata
         .and_then(|m| m.get("session_id"))
         .and_then(|v| v.as_str())
@@ -88,8 +88,7 @@ pub async fn ingest_payload_with_embedding(
 
     // 3. Spawn embedding task in background (non-blocking)
     if let Some(cfg) = config {
-        let embedder_config = embedder::EmbedderConfig::from(cfg);
-        embedder::spawn_embed_task(memory_id, pool.clone(), embedder_config);
+        embedder::spawn_embed_task(memory_id, pool.clone(), cfg);
     }
 
     Ok(memory_id)

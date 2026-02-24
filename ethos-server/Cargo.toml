@@ -42,3 +42,4 @@ axum = "0.7"
 [dev-dependencies]
 wiremock = "0.6"
 tower = { version = "0.4", features = ["util"] }
+async-trait.workspace = true

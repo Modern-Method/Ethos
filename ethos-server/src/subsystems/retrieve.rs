@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use ethos_core::config::RetrievalConfig;
-use ethos_core::embeddings::{GeminiEmbeddingClient, TaskType};
+use ethos_core::embeddings::EmbeddingBackend;
 use ethos_core::graph::{spread_activation, ActivationNode};
 use pgvector::Vector;
 use serde::{Deserialize, Serialize};
@@ -67,7 +67,7 @@ pub async fn search_memory(
     limit: Option<u32>,
     use_spreading: bool,
     pool: &PgPool,
-    client: &GeminiEmbeddingClient,
+    backend: &dyn EmbeddingBackend,
     config: &RetrievalConfig,
 ) -> Result<serde_json::Value> {
     // Validate query is not empty
@@ -84,9 +84,16 @@ pub async fn search_memory(
         .map(|l| (l as i64).clamp(1, MAX_LIMIT))
         .unwrap_or(DEFAULT_LIMIT);
 
-    // Embed the query using RETRIEVAL_QUERY task type
-    let query_vector = match client.embed_with_task(query, TaskType::RetrievalQuery).await {
-        Ok(v) => v,
+    // Embed the query using the configured backend (RETRIEVAL_QUERY task type when supported)
+    let query_vector = match backend.embed_query(query).await {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            tracing::warn!("Embedding backend returned None for query — cannot perform vector search");
+            return Ok(serde_json::json!({
+                "status": "error",
+                "error": "Embedding unavailable — vector search requires a working embedding backend"
+            }));
+        }
         Err(e) => {
             tracing::error!(error = %e, "Failed to embed query");
             return Ok(serde_json::json!({
@@ -226,12 +233,12 @@ pub async fn search_memory_legacy(query: String, limit: Option<u32>) -> Result<s
 mod tests {
     use super::*;
     use ethos_core::config::RetrievalConfig;
-    use ethos_core::embeddings::{EmbeddingConfig, GEMINI_DIMENSIONS};
+    use ethos_core::embeddings::{EmbeddingConfig, GeminiEmbeddingClient, GEMINI_DIMENSIONS};
     use wiremock::matchers::method;
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    /// Helper to create a test embedding client with mock server
-    fn create_test_client(mock_server: &MockServer) -> GeminiEmbeddingClient {
+    /// Helper to create a test embedding backend with mock server
+    fn create_test_backend(mock_server: &MockServer) -> Box<dyn EmbeddingBackend> {
         let config = EmbeddingConfig {
             api_key: "test-api-key".to_string(),
             model: "gemini-embedding-001".to_string(),
@@ -240,8 +247,10 @@ mod tests {
             retry_delay_ms: 10,
         };
 
-        GeminiEmbeddingClient::with_base_url(config, mock_server.uri())
-            .expect("Failed to create test client")
+        Box::new(
+            GeminiEmbeddingClient::with_base_url(config, mock_server.uri())
+                .expect("Failed to create test client"),
+        )
     }
 
     /// Helper to create test retrieval config
@@ -293,7 +302,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = create_test_client(&mock_server);
+        let backend = create_test_backend(&mock_server);
 
         // Insert test rows with known vectors
         let vec_a: Vec<f32> = (0..768).map(|i| (i as f32) / 768.0).collect();
@@ -331,7 +340,7 @@ mod tests {
 
         // Execute search
         let config = create_test_config();
-        let result = search_memory("test query".to_string(), Some(3), false, &pool, &client, &config)
+        let result = search_memory("test query".to_string(), Some(3), false, &pool, backend.as_ref(), &config)
             .await
             .expect("Search failed");
 
@@ -388,11 +397,11 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = create_test_client(&mock_server);
+        let backend = create_test_backend(&mock_server);
 
         // Execute search - should use RETRIEVAL_QUERY
         let config = create_test_config();
-        let result = search_memory("what did we discuss".to_string(), Some(5), false, &pool, &client, &config)
+        let result = search_memory("what did we discuss".to_string(), Some(5), false, &pool, backend.as_ref(), &config)
             .await
             .expect("Search failed");
 
@@ -429,7 +438,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = create_test_client(&mock_server);
+        let backend = create_test_backend(&mock_server);
 
         // Insert row WITHOUT vector (NULL)
         let row_no_vector: (Uuid,) = sqlx::query_as(
@@ -453,7 +462,7 @@ mod tests {
 
         // Execute search
         let config = create_test_config();
-        let result = search_memory("test query".to_string(), Some(10), false, &pool, &client, &config)
+        let result = search_memory("test query".to_string(), Some(10), false, &pool, backend.as_ref(), &config)
             .await
             .expect("Search failed");
 
@@ -497,13 +506,13 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = create_test_client(&mock_server);
+        let backend = create_test_backend(&mock_server);
 
         // that definitely won't match. Actually, just ensure no rows have vectors.
         
         // Execute search - should return empty results, NOT error
         let config = create_test_config();
-        let result = search_memory("unlikely to match anything xyzzy123".to_string(), Some(5), false, &pool, &client, &config)
+        let result = search_memory("unlikely to match anything xyzzy123".to_string(), Some(5), false, &pool, backend.as_ref(), &config)
             .await
             .expect("Search should not error");
 
@@ -534,7 +543,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = create_test_client(&mock_server);
+        let backend = create_test_backend(&mock_server);
 
         // Insert 10 rows with vectors
         let mut ids = Vec::new();
@@ -556,7 +565,7 @@ mod tests {
 
         // Search with limit 3
         let config = create_test_config();
-        let result = search_memory("test query".to_string(), Some(3), false, &pool, &client, &config)
+        let result = search_memory("test query".to_string(), Some(3), false, &pool, backend.as_ref(), &config)
             .await
             .expect("Search failed");
 
@@ -587,11 +596,11 @@ mod tests {
             .expect("Failed to connect to Postgres");
 
         let mock_server = MockServer::start().await;
-        let client = create_test_client(&mock_server);
+        let backend = create_test_backend(&mock_server);
 
         // Empty query
         let config = create_test_config();
-        let result = search_memory("".to_string(), Some(5), false, &pool, &client, &config)
+        let result = search_memory("".to_string(), Some(5), false, &pool, backend.as_ref(), &config)
             .await
             .expect("Should not panic");
 
@@ -600,7 +609,7 @@ mod tests {
         assert_eq!(status, Some("error"), "Empty query should return error status");
 
         // Whitespace-only query
-        let result = search_memory("   ".to_string(), Some(5), false, &pool, &client, &config)
+        let result = search_memory("   ".to_string(), Some(5), false, &pool, backend.as_ref(), &config)
             .await
             .expect("Should not panic");
 
@@ -624,7 +633,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = create_test_client(&mock_server);
+        let backend = create_test_backend(&mock_server);
 
         // Insert 25 rows
         let mut ids = Vec::new();
@@ -646,7 +655,7 @@ mod tests {
 
         // Request limit of 100 - should be clamped to 20
         let config = create_test_config();
-        let result = search_memory("test query".to_string(), Some(100), false, &pool, &client, &config)
+        let result = search_memory("test query".to_string(), Some(100), false, &pool, backend.as_ref(), &config)
             .await
             .expect("Search failed");
 
@@ -684,7 +693,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = create_test_client(&mock_server);
+        let backend = create_test_backend(&mock_server);
 
         // Insert 10 rows
         let mut ids = Vec::new();
@@ -706,7 +715,7 @@ mod tests {
 
         // Search with no limit - should default to 5
         let config = create_test_config();
-        let result = search_memory("test query".to_string(), None, false, &pool, &client, &config)
+        let result = search_memory("test query".to_string(), None, false, &pool, backend.as_ref(), &config)
             .await
             .expect("Search failed");
 
@@ -749,11 +758,11 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = create_test_client(&mock_server);
+        let backend = create_test_backend(&mock_server);
 
         // Search should fail gracefully
         let config = create_test_config();
-        let result = search_memory("test query".to_string(), Some(5), false, &pool, &client, &config)
+        let result = search_memory("test query".to_string(), Some(5), false, &pool, backend.as_ref(), &config)
             .await
             .expect("Should not panic on embedding failure");
 
@@ -781,7 +790,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = create_test_client(&mock_server);
+        let backend = create_test_backend(&mock_server);
 
         // Insert row with vector
         let vec_data: Vec<f32> = (0..768).map(|i| (i as f32) / 768.0).collect();
@@ -797,7 +806,7 @@ mod tests {
 
         // Execute search
         let config = create_test_config();
-        let result = search_memory("test query".to_string(), Some(5), false, &pool, &client, &config)
+        let result = search_memory("test query".to_string(), Some(5), false, &pool, backend.as_ref(), &config)
             .await
             .expect("Search failed");
 
@@ -836,7 +845,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = create_test_client(&mock_server);
+        let backend = create_test_backend(&mock_server);
 
         // Insert a test row
         let vec_data: Vec<f32> = (0..768).map(|i| (i as f32) / 768.0).collect();
@@ -852,7 +861,7 @@ mod tests {
 
         // Search with spreading activation enabled
         let config = create_test_config();
-        let result = search_memory("test query".to_string(), Some(5), true, &pool, &client, &config)
+        let result = search_memory("test query".to_string(), Some(5), true, &pool, backend.as_ref(), &config)
             .await
             .expect("Search with spreading failed");
 
@@ -884,7 +893,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = create_test_client(&mock_server);
+        let backend = create_test_backend(&mock_server);
 
         // Insert a test row
         let vec_data: Vec<f32> = (0..768).map(|i| (i as f32) / 768.0).collect();
@@ -900,12 +909,12 @@ mod tests {
 
         // Search with spreading=false
         let config = create_test_config();
-        let result_cosine = search_memory("test query".to_string(), Some(5), false, &pool, &client, &config)
+        let result_cosine = search_memory("test query".to_string(), Some(5), false, &pool, backend.as_ref(), &config)
             .await
             .expect("Cosine search failed");
 
         // Search with spreading=true (but no graph edges, so should behave similarly)
-        let result_spreading = search_memory("test query".to_string(), Some(5), true, &pool, &client, &config)
+        let result_spreading = search_memory("test query".to_string(), Some(5), true, &pool, backend.as_ref(), &config)
             .await
             .expect("Spreading search failed");
 
