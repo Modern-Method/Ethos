@@ -833,14 +833,20 @@ mod tests {
             ..Default::default()
         };
 
-        // Insert a recent session event
+        // Clean up any existing test data first
+        sqlx::query("DELETE FROM session_events WHERE session_id = 'test-idle-active'")
+            .execute(&pool)
+            .await
+            .ok();
+
+        // Insert a recent session event (with explicit created_at)
         sqlx::query(
-            "INSERT INTO session_events (session_id, agent_id, role, content) 
-             VALUES ('test-idle-active', 'test', 'user', 'test')",
+            "INSERT INTO session_events (session_id, agent_id, role, content, created_at) 
+             VALUES ('test-idle-active', 'test', 'user', 'test', NOW())",
         )
         .execute(&pool)
         .await
-        .ok();
+        .expect("Failed to insert test session event");
 
         // System should NOT be idle
         let idle = is_system_idle(&pool, &config).await;
