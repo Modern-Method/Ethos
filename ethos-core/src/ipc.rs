@@ -13,6 +13,12 @@ pub enum EthosRequest {
         limit: Option<u32>,
         #[serde(default)]
         use_spreading: bool,
+        #[serde(default)]
+        resource_id: Option<String>,
+        #[serde(default)]
+        thread_id: Option<String>,
+        #[serde(default)]
+        agent_id: Option<String>,
     },
     Get {
         id: uuid::Uuid,

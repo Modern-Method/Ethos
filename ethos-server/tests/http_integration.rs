@@ -172,6 +172,9 @@ async fn test_search_roundtrip_http() {
         limit: Some(5),
         use_spreading: false,
         min_score: None,
+        resource_id: None,
+        thread_id: None,
+        agent_id: None,
     };
 
     let (status, body) = search_inner(&pool, &config, req).await;
@@ -209,10 +212,17 @@ async fn test_search_empty_query_http() {
         limit: None,
         use_spreading: false,
         min_score: None,
+        resource_id: None,
+        thread_id: None,
+        agent_id: None,
     };
 
     let (status, body) = search_inner(&pool, &config, req).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "Empty query should return 400");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "Empty query should return 400"
+    );
     assert_eq!(body["status"], "error");
 }
 
@@ -234,10 +244,17 @@ async fn test_search_no_query_field_http() {
         limit: Some(10),
         use_spreading: false,
         min_score: None,
+        resource_id: None,
+        thread_id: None,
+        agent_id: None,
     };
 
     let (status, body) = search_inner(&pool, &config, req).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "Missing query should return 400");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "Missing query should return 400"
+    );
     assert_eq!(body["status"], "error");
 }
 
@@ -341,7 +358,11 @@ async fn test_ingest_handler_via_oneshot() {
         .unwrap();
 
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "Ingest handler should return 200");
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "Ingest handler should return 200"
+    );
 
     sqlx::query("DELETE FROM session_events WHERE session_id = $1")
         .bind(test_session)
@@ -368,6 +389,9 @@ async fn test_search_with_spreading_http() {
         limit: Some(3),
         use_spreading: true,
         min_score: None,
+        resource_id: None,
+        thread_id: None,
+        agent_id: None,
     };
 
     let (status, body) = search_inner(&pool, &config, req).await;

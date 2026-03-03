@@ -38,8 +38,28 @@ pub async fn handle_request_with_config(
                 Err(e) => EthosResponse::err(e.to_string()),
             }
         }
-        EthosRequest::Search { query, limit, use_spreading } => {
-            match handle_search_request(query, limit, use_spreading, pool, config.as_ref()).await {
+        EthosRequest::Search {
+            query,
+            limit,
+            use_spreading,
+            resource_id,
+            thread_id,
+            agent_id,
+        } => {
+            match handle_search_request(
+                query,
+                limit,
+                use_spreading,
+                retrieve::SearchFilters {
+                    resource_id,
+                    thread_id,
+                    agent_id,
+                },
+                pool,
+                config.as_ref(),
+            )
+            .await
+            {
                 Ok(data) => EthosResponse::ok(data),
                 Err(e) => EthosResponse::err(e.to_string()),
             }
@@ -77,12 +97,10 @@ pub async fn handle_request_with_config(
                 Err(e) => EthosResponse::err(e.to_string()),
             }
         }
-        EthosRequest::Embed { id } => {
-            match handle_embed_request(id, pool, config.as_ref()).await {
-                Ok(_) => EthosResponse::ok(serde_json::json!({"embedded": true, "id": id})),
-                Err(e) => EthosResponse::err(e.to_string()),
-            }
-        }
+        EthosRequest::Embed { id } => match handle_embed_request(id, pool, config.as_ref()).await {
+            Ok(_) => EthosResponse::ok(serde_json::json!({"embedded": true, "id": id})),
+            Err(e) => EthosResponse::err(e.to_string()),
+        },
         _ => EthosResponse::ok(serde_json::json!({"stub": true})),
     }
 }
@@ -111,6 +129,7 @@ async fn handle_search_request(
     query: String,
     limit: Option<u32>,
     use_spreading: bool,
+    filters: retrieve::SearchFilters,
     pool: &PgPool,
     config: Option<&ethos_core::EthosConfig>,
 ) -> anyhow::Result<serde_json::Value> {
@@ -130,6 +149,7 @@ async fn handle_search_request(
         query,
         limit,
         use_spreading,
+        filters,
         pool,
         backend.as_ref(),
         &config.retrieval,

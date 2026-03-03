@@ -84,6 +84,12 @@ pub struct SearchRequest {
     pub use_spreading: bool,
     /// Minimum score threshold (informational; filtering happens in retrieval)
     pub min_score: Option<f64>,
+    #[serde(rename = "resourceId", alias = "resource_id")]
+    pub resource_id: Option<String>,
+    #[serde(rename = "threadId", alias = "thread_id")]
+    pub thread_id: Option<String>,
+    #[serde(rename = "agentId", alias = "agent_id")]
+    pub agent_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -113,10 +119,7 @@ impl ErrorResponse {
 // ============================================================================
 
 /// Inner health check — queries DB and returns (status_code, json_body).
-pub async fn health_inner(
-    pool: &PgPool,
-    socket_path: &str,
-) -> (StatusCode, serde_json::Value) {
+pub async fn health_inner(pool: &PgPool, socket_path: &str) -> (StatusCode, serde_json::Value) {
     let pg_ver = match ethos_core::db::health_check(pool).await {
         Ok(v) => v,
         Err(e) => {
@@ -180,14 +183,13 @@ pub async fn search_inner(
         query: query.clone(),
         limit: req.limit,
         use_spreading: req.use_spreading,
+        resource_id: req.resource_id,
+        thread_id: req.thread_id,
+        agent_id: req.agent_id,
     };
 
-    let response = crate::router::handle_request_with_config(
-        ipc_request,
-        pool,
-        Some(config.clone()),
-    )
-    .await;
+    let response =
+        crate::router::handle_request_with_config(ipc_request, pool, Some(config.clone())).await;
 
     let took_ms = start.elapsed().as_millis() as u64;
 
@@ -216,12 +218,8 @@ pub async fn ingest_inner(
 ) -> (StatusCode, serde_json::Value) {
     let ipc_request = EthosRequest::Ingest { payload };
 
-    let response = crate::router::handle_request_with_config(
-        ipc_request,
-        pool,
-        Some(config.clone()),
-    )
-    .await;
+    let response =
+        crate::router::handle_request_with_config(ipc_request, pool, Some(config.clone())).await;
 
     match response_to_http(response) {
         Ok(data) => (StatusCode::OK, data),
@@ -246,12 +244,8 @@ pub async fn consolidate_inner(
         reason: req.reason,
     };
 
-    let response = crate::router::handle_request_with_config(
-        ipc_request,
-        pool,
-        Some(config.clone()),
-    )
-    .await;
+    let response =
+        crate::router::handle_request_with_config(ipc_request, pool, Some(config.clone())).await;
 
     match response_to_http(response) {
         Ok(data) => (StatusCode::OK, data),
@@ -269,9 +263,7 @@ pub async fn consolidate_inner(
 // Axum handler wrappers (thin — delegate to inner functions)
 // ============================================================================
 
-pub async fn health_handler(
-    State(state): State<Arc<HttpState>>,
-) -> impl IntoResponse {
+pub async fn health_handler(State(state): State<Arc<HttpState>>) -> impl IntoResponse {
     let (status, body) = health_inner(&state.pool, &state.config.service.socket_path).await;
     (status, Json(body))
 }
@@ -313,7 +305,9 @@ pub fn response_to_http(response: EthosResponse) -> std::result::Result<serde_js
     if response.status == "ok" {
         Ok(response.data.unwrap_or(serde_json::json!({})))
     } else {
-        Err(response.error.unwrap_or_else(|| "unknown error".to_string()))
+        Err(response
+            .error
+            .unwrap_or_else(|| "unknown error".to_string()))
     }
 }
 
@@ -392,7 +386,39 @@ mod tests {
     }
 
     // ========================================================================
-    // TEST 6: health_inner — returns 200 with expected fields (DB available)
+    // TEST 6: SearchRequest accepts scoped filter fields (camelCase + alias)
+    // ========================================================================
+    #[test]
+    fn test_search_request_deserializes_scope_filters() {
+        let camel_case = serde_json::json!({
+            "query": "test",
+            "resourceId": "resource-1",
+            "threadId": "thread-1",
+            "agentId": "agent-1"
+        });
+
+        let req: SearchRequest =
+            serde_json::from_value(camel_case).expect("camelCase payload should deserialize");
+        assert_eq!(req.resource_id.as_deref(), Some("resource-1"));
+        assert_eq!(req.thread_id.as_deref(), Some("thread-1"));
+        assert_eq!(req.agent_id.as_deref(), Some("agent-1"));
+
+        let snake_case = serde_json::json!({
+            "query": "test",
+            "resource_id": "resource-2",
+            "thread_id": "thread-2",
+            "agent_id": "agent-2"
+        });
+
+        let req: SearchRequest =
+            serde_json::from_value(snake_case).expect("snake_case payload should deserialize");
+        assert_eq!(req.resource_id.as_deref(), Some("resource-2"));
+        assert_eq!(req.thread_id.as_deref(), Some("thread-2"));
+        assert_eq!(req.agent_id.as_deref(), Some("agent-2"));
+    }
+
+    // ========================================================================
+    // TEST 7: health_inner — returns 200 with expected fields (DB available)
     // ========================================================================
     #[tokio::test]
     async fn test_health_inner_ok() {
@@ -412,7 +438,7 @@ mod tests {
     }
 
     // ========================================================================
-    // TEST 7: search_inner — empty query returns 400 BAD_REQUEST
+    // TEST 8: search_inner — empty query returns 400 BAD_REQUEST
     // ========================================================================
     #[tokio::test]
     async fn test_search_inner_empty_query() {
@@ -429,6 +455,9 @@ mod tests {
             limit: None,
             use_spreading: false,
             min_score: None,
+            resource_id: None,
+            thread_id: None,
+            agent_id: None,
         };
 
         let (status, body) = search_inner(&pool, &config, req).await;
@@ -438,7 +467,7 @@ mod tests {
     }
 
     // ========================================================================
-    // TEST 8: search_inner — None query returns 400 BAD_REQUEST
+    // TEST 9: search_inner — None query returns 400 BAD_REQUEST
     // ========================================================================
     #[tokio::test]
     async fn test_search_inner_no_query() {
@@ -455,6 +484,9 @@ mod tests {
             limit: Some(5),
             use_spreading: false,
             min_score: None,
+            resource_id: None,
+            thread_id: None,
+            agent_id: None,
         };
 
         let (status, body) = search_inner(&pool, &config, req).await;
@@ -463,7 +495,7 @@ mod tests {
     }
 
     // ========================================================================
-    // TEST 9: search_inner — whitespace-only query returns 400
+    // TEST 10: search_inner — whitespace-only query returns 400
     // ========================================================================
     #[tokio::test]
     async fn test_search_inner_whitespace_query() {
@@ -480,6 +512,9 @@ mod tests {
             limit: None,
             use_spreading: false,
             min_score: None,
+            resource_id: None,
+            thread_id: None,
+            agent_id: None,
         };
 
         let (status, body) = search_inner(&pool, &config, req).await;
@@ -488,7 +523,7 @@ mod tests {
     }
 
     // ========================================================================
-    // TEST 10: search_inner — valid query returns 200 with results array
+    // TEST 11: search_inner — valid query returns 200 with results array
     // ========================================================================
     #[tokio::test]
     async fn test_search_inner_valid_query() {
@@ -505,6 +540,9 @@ mod tests {
             limit: Some(3),
             use_spreading: false,
             min_score: None,
+            resource_id: None,
+            thread_id: None,
+            agent_id: None,
         };
 
         let (status, body) = search_inner(&pool, &config, req).await;
@@ -522,7 +560,7 @@ mod tests {
     }
 
     // ========================================================================
-    // TEST 11: ingest_inner — missing content field returns error response
+    // TEST 12: ingest_inner — missing content field returns error response
     // ========================================================================
     #[tokio::test]
     async fn test_ingest_inner_missing_content() {
@@ -546,7 +584,7 @@ mod tests {
     }
 
     // ========================================================================
-    // TEST 12: ingest_inner — valid payload stores content
+    // TEST 13: ingest_inner — valid payload stores content
     // ========================================================================
     #[tokio::test]
     async fn test_ingest_inner_valid_payload() {
@@ -620,7 +658,10 @@ mod tests {
         );
 
         if status == StatusCode::OK {
-            assert!(body["episodes_scanned"].is_number(), "Should have episodes_scanned");
+            assert!(
+                body["episodes_scanned"].is_number(),
+                "Should have episodes_scanned"
+            );
         }
     }
 

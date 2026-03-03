@@ -295,6 +295,16 @@ On every inbound message, the `ethos-context` hook:
 
 Your agent reads this file automatically as part of their workspace context — no tool calls, no prompting required.
 
+Scoped recall is supported by optional `/search` filters:
+- `resourceId` (or `resource_id`)
+- `threadId` (or `thread_id`)
+- `agentId` (or `agent_id`)
+
+Search results now return:
+- `metadata`: the original ingest metadata payload (unchanged)
+- `retrieval`: `{ cosine_score, spread_score, structural_score }`
+- `metadata_scores`: backward-compatible alias of `retrieval`
+
 ### Active (explicit tool call)
 
 Agents can also search Ethos directly using the `memory_search` tool:

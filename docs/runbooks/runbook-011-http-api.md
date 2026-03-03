@@ -119,7 +119,14 @@ Semantic search with optional spreading activation.
 ```bash
 curl -X POST http://127.0.0.1:8766/search \
   -H "Content-Type: application/json" \
-  -d '{"query": "Animus brain regions", "limit": 5, "use_spreading": true}'
+  -d '{
+    "query": "Animus brain regions",
+    "limit": 5,
+    "use_spreading": true,
+    "resourceId": "repo:ethos",
+    "threadId": "main",
+    "agentId": "forge"
+  }'
 ```
 
 Request body:
@@ -128,9 +135,17 @@ Request body:
   "query": "string (required, non-empty)",
   "limit": 5,
   "use_spreading": false,
-  "min_score": 0.12
+  "min_score": 0.12,
+  "resourceId": "optional scope filter",
+  "threadId": "optional scope filter",
+  "agentId": "optional scope filter"
 }
 ```
+
+Notes:
+- Scoping filters use camelCase in HTTP JSON: `resourceId`, `threadId`, `agentId`.
+- Filters are optional; omitted filters are not applied.
+- For backward compatibility, snake_case aliases (`resource_id`, `thread_id`, `agent_id`) are also accepted.
 
 Response:
 ```json
@@ -142,7 +157,21 @@ Response:
       "score": 0.87,
       "source": "user",
       "created_at": "2026-02-22T10:59:00Z",
-      "metadata": {}
+      "metadata": {
+        "resourceId": "repo:ethos",
+        "threadId": "main",
+        "agentId": "forge"
+      },
+      "retrieval": {
+        "cosine_score": 0.84,
+        "spread_score": 0.02,
+        "structural_score": 0.01
+      },
+      "metadata_scores": {
+        "cosine_score": 0.84,
+        "spread_score": 0.02,
+        "structural_score": 0.01
+      }
     }
   ],
   "query": "Animus brain regions",

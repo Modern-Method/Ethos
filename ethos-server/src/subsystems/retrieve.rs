@@ -31,6 +31,9 @@ pub struct SearchResult {
     pub source: String,
     pub score: f64,
     pub metadata: serde_json::Value,
+    pub retrieval: RetrievalScores,
+    pub metadata_score: RetrievalScores,
+    pub metadata_scores: RetrievalScores,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -40,6 +43,22 @@ pub struct SearchResponse {
     pub results: Vec<SearchResult>,
     pub query: String,
     pub count: usize,
+}
+
+/// Optional server-side scoping filters applied during retrieval.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SearchFilters {
+    pub resource_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub agent_id: Option<String>,
+}
+
+/// Score breakdown for retrieval ranking.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct RetrievalScores {
+    pub cosine_score: f32,
+    pub spread_score: f32,
+    pub structural_score: f32,
 }
 
 /// Search memory vectors for semantically similar content
@@ -66,6 +85,7 @@ pub async fn search_memory(
     query: String,
     limit: Option<u32>,
     use_spreading: bool,
+    filters: SearchFilters,
     pool: &PgPool,
     backend: &dyn EmbeddingBackend,
     config: &RetrievalConfig,
@@ -88,7 +108,9 @@ pub async fn search_memory(
     let query_vector = match backend.embed_query(query).await {
         Ok(Some(v)) => v,
         Ok(None) => {
-            tracing::warn!("Embedding backend returned None for query — cannot perform vector search");
+            tracing::warn!(
+                "Embedding backend returned None for query — cannot perform vector search"
+            );
             return Ok(serde_json::json!({
                 "status": "error",
                 "error": "Embedding unavailable — vector search requires a working embedding backend"
@@ -115,6 +137,22 @@ pub async fn search_memory(
         limit
     };
 
+    let resource_id = filters
+        .resource_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let thread_id = filters
+        .thread_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let agent_id = filters
+        .agent_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
     let rows = sqlx::query_as::<_, (Uuid, Option<String>, Option<String>, Option<f64>, Option<serde_json::Value>, Option<chrono::DateTime<chrono::Utc>>)>(
         r#"
         SELECT 
@@ -126,20 +164,34 @@ pub async fn search_memory(
             created_at
         FROM memory_vectors
         WHERE vector IS NOT NULL
+          AND ($2::text IS NULL OR COALESCE(metadata->>'resourceId', metadata->>'resource_id') = $2)
+          AND ($3::text IS NULL OR COALESCE(metadata->>'threadId', metadata->>'thread_id', metadata->>'session_id') = $3)
+          AND ($4::text IS NULL OR COALESCE(metadata->>'agentId', metadata->>'agent_id') = $4)
         ORDER BY vector <=> $1::vector
-        LIMIT $2
+        LIMIT $5
         "#
     )
     .bind(&vector)
+    .bind(resource_id)
+    .bind(thread_id)
+    .bind(agent_id)
     .bind(anchor_limit)
     .fetch_all(pool)
     .await?;
 
     // Build anchor nodes for spreading activation
     let mut anchors: Vec<ActivationNode> = Vec::new();
-    let mut content_map: HashMap<Uuid, (String, String, chrono::DateTime<chrono::Utc>)> = HashMap::new();
+    let mut content_map: HashMap<
+        Uuid,
+        (
+            String,
+            String,
+            serde_json::Value,
+            chrono::DateTime<chrono::Utc>,
+        ),
+    > = HashMap::new();
 
-    for (id, content, source, score, _metadata, created_at) in rows {
+    for (id, content, source, score, metadata, created_at) in rows {
         // Skip rows missing required fields
         let content = match content {
             Some(c) => c,
@@ -150,6 +202,7 @@ pub async fn search_memory(
             None => continue,
         };
         let score = score.unwrap_or(0.0) as f32;
+        let metadata = metadata.unwrap_or(serde_json::Value::Null);
         let created_at = created_at.unwrap_or_else(chrono::Utc::now);
 
         anchors.push(ActivationNode {
@@ -161,7 +214,7 @@ pub async fn search_memory(
             final_score: score,
         });
 
-        content_map.insert(id, (content, source, created_at));
+        content_map.insert(id, (content, source, metadata, created_at));
     }
 
     // Apply spreading activation if requested
@@ -178,18 +231,22 @@ pub async fn search_memory(
         .into_iter()
         .take(limit as usize)
         .filter_map(|node| {
-            let (content, source, created_at) = content_map.get(&node.id)?;
-            
+            let (content, source, metadata, created_at) = content_map.get(&node.id)?;
+            let retrieval = RetrievalScores {
+                cosine_score: node.cosine_score,
+                spread_score: node.spread_score,
+                structural_score: node.structural_score,
+            };
+
             Some(SearchResult {
                 id: node.id,
                 content: content.clone(),
                 source: source.clone(),
                 score: node.final_score as f64,
-                metadata: serde_json::json!({
-                    "cosine_score": node.cosine_score,
-                    "spread_score": node.spread_score,
-                    "structural_score": node.structural_score,
-                }),
+                metadata: metadata.clone(),
+                retrieval,
+                metadata_score: retrieval,
+                metadata_scores: retrieval,
                 created_at: *created_at,
             })
         })
@@ -203,7 +260,7 @@ pub async fn search_memory(
         .iter()
         .map(|r| (r.id, "vector".to_string()))
         .collect();
-    
+
     tokio::spawn(async move {
         for (id, source_type) in result_ids {
             if let Err(e) = super::decay::record_retrieval(&pool_clone, id, &source_type).await {
@@ -295,7 +352,7 @@ mod tests {
             .expect("Failed to connect to Postgres");
 
         let mock_server = MockServer::start().await;
-        
+
         // Mock any POST request to return embedding
         Mock::given(method("POST"))
             .respond_with(ResponseTemplate::new(200).set_body_json(mock_embedding_response()))
@@ -340,17 +397,32 @@ mod tests {
 
         // Execute search
         let config = create_test_config();
-        let result = search_memory("test query".to_string(), Some(3), false, &pool, backend.as_ref(), &config)
-            .await
-            .expect("Search failed");
+        let result = search_memory(
+            "test query".to_string(),
+            Some(3),
+            false,
+            SearchFilters::default(),
+            &pool,
+            backend.as_ref(),
+            &config,
+        )
+        .await
+        .expect("Search failed");
 
         // Verify - result should have "results" key (not "status": "error")
         let status = result.get("status").and_then(|s| s.as_str());
-        assert_ne!(status, Some("error"), "Search should not return error: {:?}", result);
-        
-        let results = result.get("results").expect(&format!("Missing results in: {:?}", result));
+        assert_ne!(
+            status,
+            Some("error"),
+            "Search should not return error: {:?}",
+            result
+        );
+
+        let results = result
+            .get("results")
+            .expect(&format!("Missing results in: {:?}", result));
         let results_arr = results.as_array().expect("Results not an array");
-        
+
         assert!(!results_arr.is_empty(), "Should return results");
         assert!(results_arr.len() <= 3, "Should respect limit");
 
@@ -360,7 +432,7 @@ mod tests {
                 .iter()
                 .filter_map(|r| r.get("score").and_then(|s| s.as_f64()))
                 .collect();
-            
+
             for i in 1..scores.len() {
                 assert!(
                     scores[i - 1] >= scores[i],
@@ -401,17 +473,28 @@ mod tests {
 
         // Execute search - should use RETRIEVAL_QUERY
         let config = create_test_config();
-        let result = search_memory("what did we discuss".to_string(), Some(5), false, &pool, backend.as_ref(), &config)
-            .await
-            .expect("Search failed");
+        let result = search_memory(
+            "what did we discuss".to_string(),
+            Some(5),
+            false,
+            SearchFilters::default(),
+            &pool,
+            backend.as_ref(),
+            &config,
+        )
+        .await
+        .expect("Search failed");
 
         // If the mock was hit, the task type was correct
         assert!(result.get("results").is_some(), "Should have results key");
-        
+
         // Verify the mock received a request with RETRIEVAL_QUERY
         let received_requests = mock_server.received_requests().await.unwrap_or_default();
-        assert!(!received_requests.is_empty(), "Mock should have received at least one request");
-        
+        assert!(
+            !received_requests.is_empty(),
+            "Mock should have received at least one request"
+        );
+
         // Check that the request body contains RETRIEVAL_QUERY
         let last_request = received_requests.last().unwrap();
         let body_str = String::from_utf8_lossy(&last_request.body);
@@ -451,7 +534,7 @@ mod tests {
         // Insert row WITH vector
         let vec_data: Vec<f32> = (0..768).map(|i| (i as f32) / 768.0).collect();
         let vector = Vector::from(vec_data);
-        
+
         let row_with_vector: (Uuid,) = sqlx::query_as(
             "INSERT INTO memory_vectors (content, source, vector) VALUES ('has vector', 'test', $1) RETURNING id"
         )
@@ -462,9 +545,17 @@ mod tests {
 
         // Execute search
         let config = create_test_config();
-        let result = search_memory("test query".to_string(), Some(10), false, &pool, backend.as_ref(), &config)
-            .await
-            .expect("Search failed");
+        let result = search_memory(
+            "test query".to_string(),
+            Some(10),
+            false,
+            SearchFilters::default(),
+            &pool,
+            backend.as_ref(),
+            &config,
+        )
+        .await
+        .expect("Search failed");
 
         let results = result.get("results").unwrap().as_array().unwrap();
 
@@ -509,22 +600,37 @@ mod tests {
         let backend = create_test_backend(&mock_server);
 
         // that definitely won't match. Actually, just ensure no rows have vectors.
-        
+
         // Execute search - should return empty results, NOT error
         let config = create_test_config();
-        let result = search_memory("unlikely to match anything xyzzy123".to_string(), Some(5), false, &pool, backend.as_ref(), &config)
-            .await
-            .expect("Search should not error");
+        let result = search_memory(
+            "unlikely to match anything xyzzy123".to_string(),
+            Some(5),
+            false,
+            SearchFilters::default(),
+            &pool,
+            backend.as_ref(),
+            &config,
+        )
+        .await
+        .expect("Search should not error");
 
         // Should have status implicitly via being a valid response
         assert!(result.get("results").is_some(), "Should have results key");
-        
+
         let results = result.get("results").unwrap().as_array().unwrap();
         let count = result.get("count").unwrap().as_u64().unwrap();
 
         // Empty results is OK, not an error
-        assert!(results.is_empty() || results.len() <= 5, "Should have 0-5 results");
-        assert_eq!(count as usize, results.len(), "Count should match results length");
+        assert!(
+            results.is_empty() || results.len() <= 5,
+            "Should have 0-5 results"
+        );
+        assert_eq!(
+            count as usize,
+            results.len(),
+            "Count should match results length"
+        );
     }
 
     // ========================================================================
@@ -565,9 +671,17 @@ mod tests {
 
         // Search with limit 3
         let config = create_test_config();
-        let result = search_memory("test query".to_string(), Some(3), false, &pool, backend.as_ref(), &config)
-            .await
-            .expect("Search failed");
+        let result = search_memory(
+            "test query".to_string(),
+            Some(3),
+            false,
+            SearchFilters::default(),
+            &pool,
+            backend.as_ref(),
+            &config,
+        )
+        .await
+        .expect("Search failed");
 
         let results = result.get("results").unwrap().as_array().unwrap();
         let count = result.get("count").unwrap().as_u64().unwrap();
@@ -600,21 +714,45 @@ mod tests {
 
         // Empty query
         let config = create_test_config();
-        let result = search_memory("".to_string(), Some(5), false, &pool, backend.as_ref(), &config)
-            .await
-            .expect("Should not panic");
+        let result = search_memory(
+            "".to_string(),
+            Some(5),
+            false,
+            SearchFilters::default(),
+            &pool,
+            backend.as_ref(),
+            &config,
+        )
+        .await
+        .expect("Should not panic");
 
         // Should return error status
         let status = result.get("status").and_then(|s| s.as_str());
-        assert_eq!(status, Some("error"), "Empty query should return error status");
+        assert_eq!(
+            status,
+            Some("error"),
+            "Empty query should return error status"
+        );
 
         // Whitespace-only query
-        let result = search_memory("   ".to_string(), Some(5), false, &pool, backend.as_ref(), &config)
-            .await
-            .expect("Should not panic");
+        let result = search_memory(
+            "   ".to_string(),
+            Some(5),
+            false,
+            SearchFilters::default(),
+            &pool,
+            backend.as_ref(),
+            &config,
+        )
+        .await
+        .expect("Should not panic");
 
         let status = result.get("status").and_then(|s| s.as_str());
-        assert_eq!(status, Some("error"), "Whitespace-only query should return error status");
+        assert_eq!(
+            status,
+            Some("error"),
+            "Whitespace-only query should return error status"
+        );
     }
 
     // ========================================================================
@@ -655,9 +793,17 @@ mod tests {
 
         // Request limit of 100 - should be clamped to 20
         let config = create_test_config();
-        let result = search_memory("test query".to_string(), Some(100), false, &pool, backend.as_ref(), &config)
-            .await
-            .expect("Search failed");
+        let result = search_memory(
+            "test query".to_string(),
+            Some(100),
+            false,
+            SearchFilters::default(),
+            &pool,
+            backend.as_ref(),
+            &config,
+        )
+        .await
+        .expect("Search failed");
 
         let results = result.get("results").unwrap().as_array().unwrap();
 
@@ -715,14 +861,26 @@ mod tests {
 
         // Search with no limit - should default to 5
         let config = create_test_config();
-        let result = search_memory("test query".to_string(), None, false, &pool, backend.as_ref(), &config)
-            .await
-            .expect("Search failed");
+        let result = search_memory(
+            "test query".to_string(),
+            None,
+            false,
+            SearchFilters::default(),
+            &pool,
+            backend.as_ref(),
+            &config,
+        )
+        .await
+        .expect("Search failed");
 
         let results = result.get("results").unwrap().as_array().unwrap();
         let count = result.get("count").unwrap().as_u64().unwrap();
 
-        assert_eq!(results.len(), 5, "Should return exactly 5 results by default");
+        assert_eq!(
+            results.len(),
+            5,
+            "Should return exactly 5 results by default"
+        );
         assert_eq!(count, 5, "Count should be 5");
 
         // Cleanup
@@ -746,15 +904,12 @@ mod tests {
             .expect("Failed to connect to Postgres");
 
         let mock_server = MockServer::start().await;
-        
+
         // Mock API failure
         Mock::given(method("POST"))
-            .respond_with(
-                ResponseTemplate::new(500)
-                    .set_body_json(serde_json::json!({
-                        "error": { "code": 500, "message": "Internal server error" }
-                    }))
-            )
+            .respond_with(ResponseTemplate::new(500).set_body_json(serde_json::json!({
+                "error": { "code": 500, "message": "Internal server error" }
+            })))
             .mount(&mock_server)
             .await;
 
@@ -762,14 +917,26 @@ mod tests {
 
         // Search should fail gracefully
         let config = create_test_config();
-        let result = search_memory("test query".to_string(), Some(5), false, &pool, backend.as_ref(), &config)
-            .await
-            .expect("Should not panic on embedding failure");
+        let result = search_memory(
+            "test query".to_string(),
+            Some(5),
+            false,
+            SearchFilters::default(),
+            &pool,
+            backend.as_ref(),
+            &config,
+        )
+        .await
+        .expect("Should not panic on embedding failure");
 
         // Should return error status
         let status = result.get("status").and_then(|s| s.as_str());
-        assert_eq!(status, Some("error"), "Should return error status on embedding failure");
-        
+        assert_eq!(
+            status,
+            Some("error"),
+            "Should return error status on embedding failure"
+        );
+
         let error = result.get("error").and_then(|e| e.as_str());
         assert!(error.is_some(), "Should have error message");
     }
@@ -806,9 +973,17 @@ mod tests {
 
         // Execute search
         let config = create_test_config();
-        let result = search_memory("test query".to_string(), Some(5), false, &pool, backend.as_ref(), &config)
-            .await
-            .expect("Search failed");
+        let result = search_memory(
+            "test query".to_string(),
+            Some(5),
+            false,
+            SearchFilters::default(),
+            &pool,
+            backend.as_ref(),
+            &config,
+        )
+        .await
+        .expect("Search failed");
 
         let results = result.get("results").unwrap().as_array().unwrap();
 
@@ -861,13 +1036,24 @@ mod tests {
 
         // Search with spreading activation enabled
         let config = create_test_config();
-        let result = search_memory("test query".to_string(), Some(5), true, &pool, backend.as_ref(), &config)
-            .await
-            .expect("Search with spreading failed");
+        let result = search_memory(
+            "test query".to_string(),
+            Some(5),
+            true,
+            SearchFilters::default(),
+            &pool,
+            backend.as_ref(),
+            &config,
+        )
+        .await
+        .expect("Search with spreading failed");
 
         // Should return results (even with empty graph, spreading falls back to cosine)
         let results = result.get("results").unwrap().as_array().unwrap();
-        assert!(!results.is_empty(), "Should return results even with spreading");
+        assert!(
+            !results.is_empty(),
+            "Should return results even with spreading"
+        );
 
         // Cleanup
         sqlx::query("DELETE FROM memory_vectors WHERE id = $1")
@@ -909,21 +1095,40 @@ mod tests {
 
         // Search with spreading=false
         let config = create_test_config();
-        let result_cosine = search_memory("test query".to_string(), Some(5), false, &pool, backend.as_ref(), &config)
-            .await
-            .expect("Cosine search failed");
+        let result_cosine = search_memory(
+            "test query".to_string(),
+            Some(5),
+            false,
+            SearchFilters::default(),
+            &pool,
+            backend.as_ref(),
+            &config,
+        )
+        .await
+        .expect("Cosine search failed");
 
         // Search with spreading=true (but no graph edges, so should behave similarly)
-        let result_spreading = search_memory("test query".to_string(), Some(5), true, &pool, backend.as_ref(), &config)
-            .await
-            .expect("Spreading search failed");
+        let result_spreading = search_memory(
+            "test query".to_string(),
+            Some(5),
+            true,
+            SearchFilters::default(),
+            &pool,
+            backend.as_ref(),
+            &config,
+        )
+        .await
+        .expect("Spreading search failed");
 
         // Both should return results
         let cosine_results = result_cosine.get("results").unwrap().as_array().unwrap();
         let spreading_results = result_spreading.get("results").unwrap().as_array().unwrap();
 
-        assert_eq!(cosine_results.len(), spreading_results.len(), 
-            "With no graph edges, spreading should return same count as pure cosine");
+        assert_eq!(
+            cosine_results.len(),
+            spreading_results.len(),
+            "With no graph edges, spreading should return same count as pure cosine"
+        );
 
         // Cleanup
         sqlx::query("DELETE FROM memory_vectors WHERE id = $1")
@@ -931,5 +1136,197 @@ mod tests {
             .execute(&pool)
             .await
             .ok();
+    }
+
+    // ========================================================================
+    // TEST 13: stored ingest metadata passes through unchanged
+    // ========================================================================
+    #[tokio::test]
+    async fn test_search_returns_stored_metadata_unchanged() {
+        let database_url = "postgresql://ethos:ethos_dev@localhost:5432/ethos";
+        let pool = PgPool::connect(database_url)
+            .await
+            .expect("Failed to connect to Postgres");
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(mock_embedding_response()))
+            .mount(&mock_server)
+            .await;
+
+        let backend = create_test_backend(&mock_server);
+        let metadata = serde_json::json!({
+            "resourceId": "resource-metadata-pass-through",
+            "threadId": "thread-metadata-pass-through",
+            "agentId": "agent-metadata-pass-through",
+            "nested": { "source": "unit-test" },
+            "tags": ["alpha", "beta"]
+        });
+
+        let vec_data: Vec<f32> = (0..768).map(|i| (i as f32) / 768.0).collect();
+        let vector = Vector::from(vec_data);
+
+        let row: (Uuid,) = sqlx::query_as(
+            "INSERT INTO memory_vectors (content, source, vector, metadata) VALUES ('metadata passthrough', 'test', $1, $2) RETURNING id"
+        )
+        .bind(&vector)
+        .bind(&metadata)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to insert row");
+
+        let config = create_test_config();
+        let result = search_memory(
+            "test query".to_string(),
+            Some(5),
+            false,
+            SearchFilters {
+                resource_id: Some("resource-metadata-pass-through".to_string()),
+                thread_id: None,
+                agent_id: None,
+            },
+            &pool,
+            backend.as_ref(),
+            &config,
+        )
+        .await
+        .expect("Search failed");
+
+        let results = result["results"].as_array().expect("results must be array");
+        assert_eq!(
+            results.len(),
+            1,
+            "Should return exactly one filtered result"
+        );
+
+        let first = &results[0];
+        assert_eq!(
+            first["metadata"], metadata,
+            "Metadata should be returned unchanged from ingest storage"
+        );
+        assert_eq!(
+            first["metadata_scores"], first["retrieval"],
+            "metadata_scores alias should match retrieval score breakdown"
+        );
+        assert_eq!(
+            first["metadata_score"], first["retrieval"],
+            "metadata_score alias should match retrieval score breakdown"
+        );
+        assert!(
+            first["retrieval"]["cosine_score"].is_number()
+                && first["retrieval"]["spread_score"].is_number()
+                && first["retrieval"]["structural_score"].is_number(),
+            "Retrieval score breakdown should be present"
+        );
+
+        sqlx::query("DELETE FROM memory_vectors WHERE id = $1")
+            .bind(row.0)
+            .execute(&pool)
+            .await
+            .ok();
+    }
+
+    // ========================================================================
+    // TEST 14: optional scope filters are enforced server-side
+    // ========================================================================
+    #[tokio::test]
+    async fn test_search_applies_scope_filters() {
+        let database_url = "postgresql://ethos:ethos_dev@localhost:5432/ethos";
+        let pool = PgPool::connect(database_url)
+            .await
+            .expect("Failed to connect to Postgres");
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(mock_embedding_response()))
+            .mount(&mock_server)
+            .await;
+
+        let backend = create_test_backend(&mock_server);
+        let vec_data: Vec<f32> = (0..768).map(|i| (i as f32) / 768.0).collect();
+        let vector = Vector::from(vec_data);
+
+        let row_match: (Uuid,) = sqlx::query_as(
+            "INSERT INTO memory_vectors (content, source, vector, metadata) VALUES ('scope match', 'test', $1, $2) RETURNING id"
+        )
+        .bind(&vector)
+        .bind(serde_json::json!({
+            "resourceId": "scope-resource",
+            "threadId": "scope-thread",
+            "agentId": "scope-agent",
+        }))
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to insert matching row");
+
+        let row_thread_alias: (Uuid,) = sqlx::query_as(
+            "INSERT INTO memory_vectors (content, source, vector, metadata) VALUES ('scope session alias', 'test', $1, $2) RETURNING id"
+        )
+        .bind(&vector)
+        .bind(serde_json::json!({
+            "resource_id": "scope-resource",
+            "session_id": "scope-thread",
+            "agent_id": "scope-agent",
+        }))
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to insert alias row");
+
+        let row_non_match: (Uuid,) = sqlx::query_as(
+            "INSERT INTO memory_vectors (content, source, vector, metadata) VALUES ('scope miss', 'test', $1, $2) RETURNING id"
+        )
+        .bind(&vector)
+        .bind(serde_json::json!({
+            "resourceId": "other-resource",
+            "threadId": "scope-thread",
+            "agentId": "scope-agent",
+        }))
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to insert non-matching row");
+
+        let config = create_test_config();
+        let result = search_memory(
+            "test query".to_string(),
+            Some(10),
+            false,
+            SearchFilters {
+                resource_id: Some("scope-resource".to_string()),
+                thread_id: Some("scope-thread".to_string()),
+                agent_id: Some("scope-agent".to_string()),
+            },
+            &pool,
+            backend.as_ref(),
+            &config,
+        )
+        .await
+        .expect("Search failed");
+
+        let results = result["results"].as_array().expect("results must be array");
+        let ids: Vec<String> = results
+            .iter()
+            .filter_map(|item| item["id"].as_str().map(ToString::to_string))
+            .collect();
+
+        assert!(
+            ids.contains(&row_match.0.to_string()),
+            "Expected exact camelCase metadata row to match"
+        );
+        assert!(
+            ids.contains(&row_thread_alias.0.to_string()),
+            "Expected snake_case/session_id metadata aliases to match"
+        );
+        assert!(
+            !ids.contains(&row_non_match.0.to_string()),
+            "Non-matching resourceId should be filtered out"
+        );
+
+        for id in [row_match.0, row_thread_alias.0, row_non_match.0] {
+            sqlx::query("DELETE FROM memory_vectors WHERE id = $1")
+                .bind(id)
+                .execute(&pool)
+                .await
+                .ok();
+        }
     }
 }
