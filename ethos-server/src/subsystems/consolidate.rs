@@ -62,8 +62,14 @@ pub struct ExtractedFact {
 pub enum FactUpsertResult {
     Created(Uuid),
     Updated(Uuid),
-    Superseded { old: Uuid, new: Uuid },
-    Flagged { existing: Uuid, new_statement: String },
+    Superseded {
+        old: Uuid,
+        new: Uuid,
+    },
+    Flagged {
+        existing: Uuid,
+        new_statement: String,
+    },
     Skipped,
 }
 
@@ -127,7 +133,7 @@ pub async fn run_consolidation_loop(
                                 report.episodes_promoted,
                                 report.facts_created
                             );
-                            
+
                             // Run decay sweep after consolidation (Story 010)
                             if let Err(e) = super::decay::run_decay_sweep(&pool, &decay_config).await {
                                 tracing::warn!("Decay sweep error (non-fatal): {}", e);
@@ -302,7 +308,10 @@ fn extract_fact_from_episode(episode: &EpisodicTrace) -> Option<ExtractedFact> {
 
     // Decision patterns
     let decision_patterns = [
-        (r"(?i)(?:we\s+)?decided\s+(?:to\s+)?(?:use|go\s+with|switch\s+to)\s+(\w+)", "uses"),
+        (
+            r"(?i)(?:we\s+)?decided\s+(?:to\s+)?(?:use|go\s+with|switch\s+to)\s+(\w+)",
+            "uses",
+        ),
         (r"(?i)let''s\s+go\s+with\s+(\w+)", "uses"),
         (r"(?i)the\s+plan\s+is\s+(?:to\s+)?(.+?)(?:\.|$)", "plan"),
         (r"(?i)we''ll\s+use\s+(\w+)", "uses"),
@@ -312,7 +321,10 @@ fn extract_fact_from_episode(episode: &EpisodicTrace) -> Option<ExtractedFact> {
     for (pattern, predicate) in decision_patterns.iter() {
         if let Ok(re) = Regex::new(pattern) {
             if let Some(caps) = re.captures(content) {
-                let object = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+                let object = caps
+                    .get(1)
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_default();
                 if !object.is_empty() {
                     return Some(ExtractedFact {
                         kind: "decision".to_string(),
@@ -332,7 +344,10 @@ fn extract_fact_from_episode(episode: &EpisodicTrace) -> Option<ExtractedFact> {
 
     // Preference patterns
     let preference_patterns = [
-        (r"(?i)(\w+)\s+prefers?\s+(\w+(?:\s+\w+)?)\s+(?:over|than)\s+(\w+)", "prefers"),
+        (
+            r"(?i)(\w+)\s+prefers?\s+(\w+(?:\s+\w+)?)\s+(?:over|than)\s+(\w+)",
+            "prefers",
+        ),
         (r"(?i)(\w+)\s+loves?\s+(\w+)", "loves"),
         (r"(?i)(\w+)\s+hates?\s+(\w+)", "hates"),
         (r"(?i)(\w+)\s+always\s+(\w+)", "always"),
@@ -343,8 +358,14 @@ fn extract_fact_from_episode(episode: &EpisodicTrace) -> Option<ExtractedFact> {
     for (pattern, predicate) in preference_patterns.iter() {
         if let Ok(re) = Regex::new(pattern) {
             if let Some(caps) = re.captures(content) {
-                let subject = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
-                let object = caps.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
+                let subject = caps
+                    .get(1)
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_default();
+                let object = caps
+                    .get(2)
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_default();
                 if !subject.is_empty() && !object.is_empty() {
                     return Some(ExtractedFact {
                         kind: "preference".to_string(),
@@ -372,12 +393,16 @@ fn extract_fact_from_episode(episode: &EpisodicTrace) -> Option<ExtractedFact> {
     for pattern in marker_patterns.iter() {
         if let Ok(re) = Regex::new(pattern) {
             if let Some(caps) = re.captures(content) {
-                let statement = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+                let statement = caps
+                    .get(1)
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_default();
                 if !statement.is_empty() {
                     return Some(ExtractedFact {
                         kind: "fact".to_string(),
                         statement: statement.clone(),
-                        subject: extract_subject(&statement).unwrap_or_else(|| "context".to_string()),
+                        subject: extract_subject(&statement)
+                            .unwrap_or_else(|| "context".to_string()),
                         predicate: "is".to_string(),
                         object: truncate_statement(&statement, 50),
                         topics: episode.topics.clone(),
@@ -467,13 +492,11 @@ async fn upsert_fact(
             } else if is_decision {
                 // Supersession: explicit decision → always supersede
                 let new_id = insert_fact(pool, fact).await?;
-                sqlx::query(
-                    "UPDATE semantic_facts SET superseded_by = $1 WHERE id = $2",
-                )
-                .bind(new_id)
-                .bind(existing_id)
-                .execute(pool)
-                .await?;
+                sqlx::query("UPDATE semantic_facts SET superseded_by = $1 WHERE id = $2")
+                    .bind(new_id)
+                    .bind(existing_id)
+                    .execute(pool)
+                    .await?;
                 Ok(FactUpsertResult::Superseded {
                     old: existing_id,
                     new: new_id,
@@ -481,13 +504,11 @@ async fn upsert_fact(
             } else if confidence_delta >= conflict_config.auto_supersede_confidence_delta {
                 // Auto-supersede: new confidence significantly higher
                 let new_id = insert_fact(pool, fact).await?;
-                sqlx::query(
-                    "UPDATE semantic_facts SET superseded_by = $1 WHERE id = $2",
-                )
-                .bind(new_id)
-                .bind(existing_id)
-                .execute(pool)
-                .await?;
+                sqlx::query("UPDATE semantic_facts SET superseded_by = $1 WHERE id = $2")
+                    .bind(new_id)
+                    .bind(existing_id)
+                    .execute(pool)
+                    .await?;
                 Ok(FactUpsertResult::Superseded {
                     old: existing_id,
                     new: new_id,
@@ -698,10 +719,7 @@ mod tests {
     // ========================================================================
     #[test]
     fn test_extract_decision_fact() {
-        let episode = create_test_episode(
-            "We decided to use Rust for all backend services",
-            0.5,
-        );
+        let episode = create_test_episode("We decided to use Rust for all backend services", 0.5);
 
         let fact = extract_fact_from_episode(&episode);
         assert!(fact.is_some());
@@ -732,10 +750,8 @@ mod tests {
     // ========================================================================
     #[test]
     fn test_extract_fallback_fact() {
-        let episode = create_test_episode(
-            "Some random high importance content without keywords",
-            0.9,
-        );
+        let episode =
+            create_test_episode("Some random high importance content without keywords", 0.9);
 
         let fact = extract_fact_from_episode(&episode);
         assert!(fact.is_some());
@@ -761,10 +777,7 @@ mod tests {
     // ========================================================================
     #[test]
     fn test_extract_remember_marker() {
-        let episode = create_test_episode(
-            "Remember this: The API key is stored in the vault",
-            0.5,
-        );
+        let episode = create_test_episode("Remember this: The API key is stored in the vault", 0.5);
 
         let fact = extract_fact_from_episode(&episode);
         assert!(fact.is_some());
@@ -893,13 +906,13 @@ mod tests {
         // Note: This test may fail if there are other recent events in the DB
         // For a more robust test, we'd need transaction isolation
         let _idle = is_system_idle(&pool, &config).await;
-        
+
         // Cleanup
         sqlx::query("DELETE FROM session_events WHERE session_id = 'test-idle-old'")
             .execute(&pool)
             .await
             .ok();
-        
+
         // This test is informational - the is_system_idle function depends on
         // the overall system state which we can't fully control in integration tests
     }
@@ -918,14 +931,12 @@ mod tests {
 
         // Create test session
         let session_id = Uuid::new_v4();
-        sqlx::query(
-            "INSERT INTO sessions (id, session_key, agent_id) VALUES ($1, $2, 'test')",
-        )
-        .bind(session_id)
-        .bind(format!("test-consolidation-{}", session_id))
-        .execute(&pool)
-        .await
-        .ok();
+        sqlx::query("INSERT INTO sessions (id, session_key, agent_id) VALUES ($1, $2, 'test')")
+            .bind(session_id)
+            .bind(format!("test-consolidation-{}", session_id))
+            .execute(&pool)
+            .await
+            .ok();
 
         // Insert episodic traces
         let mut episode_ids = Vec::new();
@@ -952,8 +963,14 @@ mod tests {
             .expect("Consolidation failed");
 
         // Should have scanned all 5 and promoted at least some
-        assert!(report.episodes_scanned >= 3, "Should scan eligible episodes");
-        assert!(report.episodes_promoted >= 1, "Should promote at least one episode");
+        assert!(
+            report.episodes_scanned >= 3,
+            "Should scan eligible episodes"
+        );
+        assert!(
+            report.episodes_promoted >= 1,
+            "Should promote at least one episode"
+        );
 
         // Verify episodes are marked consolidated
         let consolidated_count: Option<i64> = sqlx::query_scalar(
@@ -1002,14 +1019,12 @@ mod tests {
 
         // Create test session
         let session_id = Uuid::new_v4();
-        sqlx::query(
-            "INSERT INTO sessions (id, session_key, agent_id) VALUES ($1, $2, 'test')",
-        )
-        .bind(session_id)
-        .bind(format!("test-marks-{}", session_id))
-        .execute(&pool)
-        .await
-        .ok();
+        sqlx::query("INSERT INTO sessions (id, session_key, agent_id) VALUES ($1, $2, 'test')")
+            .bind(session_id)
+            .bind(format!("test-marks-{}", session_id))
+            .execute(&pool)
+            .await
+            .ok();
 
         // Insert high-importance episode
         let episode_id: Uuid = sqlx::query_scalar(
@@ -1022,17 +1037,16 @@ mod tests {
         .expect("Failed to insert episode");
 
         // Run consolidation
-        let _ = run_consolidation_cycle(&pool, &config, &conflict_config, &decay_config, None)
-            .await;
+        let _ =
+            run_consolidation_cycle(&pool, &config, &conflict_config, &decay_config, None).await;
 
         // Verify episode has consolidated_at
-        let consolidated_at: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
-            "SELECT consolidated_at FROM episodic_traces WHERE id = $1",
-        )
-        .bind(episode_id)
-        .fetch_one(&pool)
-        .await
-        .expect("Failed to check consolidated_at");
+        let consolidated_at: Option<chrono::DateTime<chrono::Utc>> =
+            sqlx::query_scalar("SELECT consolidated_at FROM episodic_traces WHERE id = $1")
+                .bind(episode_id)
+                .fetch_one(&pool)
+                .await
+                .expect("Failed to check consolidated_at");
 
         assert!(
             consolidated_at.is_some(),
@@ -1311,14 +1325,12 @@ mod tests {
 
         // Create test session + episode
         let session_id = Uuid::new_v4();
-        sqlx::query(
-            "INSERT INTO sessions (id, session_key, agent_id) VALUES ($1, $2, 'test')",
-        )
-        .bind(session_id)
-        .bind(format!("test-markcons-{}", session_id))
-        .execute(&pool)
-        .await
-        .ok();
+        sqlx::query("INSERT INTO sessions (id, session_key, agent_id) VALUES ($1, $2, 'test')")
+            .bind(session_id)
+            .bind(format!("test-markcons-{}", session_id))
+            .execute(&pool)
+            .await
+            .ok();
 
         let ep_id: Uuid = sqlx::query_scalar(
             "INSERT INTO episodic_traces (session_id, agent_id, turn_index, role, content, importance)
@@ -1335,18 +1347,25 @@ mod tests {
             .expect("mark_consolidated failed");
 
         // Verify consolidated_at is set
-        let consolidated_at: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
-            "SELECT consolidated_at FROM episodic_traces WHERE id = $1",
-        )
-        .bind(ep_id)
-        .fetch_one(&pool)
-        .await
-        .expect("Failed to check");
+        let consolidated_at: Option<chrono::DateTime<chrono::Utc>> =
+            sqlx::query_scalar("SELECT consolidated_at FROM episodic_traces WHERE id = $1")
+                .bind(ep_id)
+                .fetch_one(&pool)
+                .await
+                .expect("Failed to check");
 
         assert!(consolidated_at.is_some(), "consolidated_at should be set");
 
         // Cleanup
-        sqlx::query("DELETE FROM episodic_traces WHERE session_id = $1").bind(session_id).execute(&pool).await.ok();
-        sqlx::query("DELETE FROM sessions WHERE id = $1").bind(session_id).execute(&pool).await.ok();
+        sqlx::query("DELETE FROM episodic_traces WHERE session_id = $1")
+            .bind(session_id)
+            .execute(&pool)
+            .await
+            .ok();
+        sqlx::query("DELETE FROM sessions WHERE id = $1")
+            .bind(session_id)
+            .execute(&pool)
+            .await
+            .ok();
     }
 }

@@ -13,7 +13,7 @@ use ethos_core::embeddings::EmbeddingBackend;
 use pgvector::Vector;
 use sqlx::PgPool;
 use std::sync::Arc;
-use tokio::time::{Duration, interval};
+use tokio::time::{interval, Duration};
 use uuid::Uuid;
 
 /// Run the background re-embed worker loop.
@@ -340,21 +340,29 @@ mod tests {
             .await
             .expect("tick should succeed");
 
-        assert!(embedded >= 3, "Should have embedded at least 3 rows, got {}", embedded);
+        assert!(
+            embedded >= 3,
+            "Should have embedded at least 3 rows, got {}",
+            embedded
+        );
         assert_eq!(skipped, 0);
         assert!(backend.calls() >= 3);
 
         // Verify vectors are no longer NULL
         for id in &ids {
-            let has_vector: Option<bool> = sqlx::query_scalar(
-                "SELECT vector IS NOT NULL FROM memory_vectors WHERE id = $1",
-            )
-            .bind(id)
-            .fetch_one(&pool)
-            .await
-            .expect("Row not found");
+            let has_vector: Option<bool> =
+                sqlx::query_scalar("SELECT vector IS NOT NULL FROM memory_vectors WHERE id = $1")
+                    .bind(id)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("Row not found");
 
-            assert_eq!(has_vector, Some(true), "Vector should be populated for {}", id);
+            assert_eq!(
+                has_vector,
+                Some(true),
+                "Vector should be populated for {}",
+                id
+            );
         }
 
         // Cleanup
@@ -432,7 +440,10 @@ mod tests {
             .expect("tick should succeed");
 
         assert_eq!(embedded, 0);
-        assert!(skipped > 0, "All should be skipped when backend returns None");
+        assert!(
+            skipped > 0,
+            "All should be skipped when backend returns None"
+        );
 
         // Cleanup
         sqlx::query("DELETE FROM memory_vectors WHERE id = $1")

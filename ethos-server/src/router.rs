@@ -136,10 +136,7 @@ async fn handle_search_request(
     let config = match config {
         Some(c) => c,
         None => {
-            return Ok(serde_json::json!({
-                "status": "error",
-                "error": "No config available for embedding"
-            }));
+            return Err(anyhow::anyhow!("No config available for embedding"));
         }
     };
 

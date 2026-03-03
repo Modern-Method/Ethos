@@ -8,12 +8,8 @@
 //! Embedding runs in tokio::spawn AFTER the IPC response is sent — never blocks the caller.
 
 use ethos_core::{
-    embeddings::{
-        BackendConfig, EmbeddingBackend, EmbeddingConfig, EmbeddingError,
-        OnnxConfig,
-    },
-    onnx_embedder,
-    EthosConfig,
+    embeddings::{BackendConfig, EmbeddingBackend, EmbeddingConfig, EmbeddingError, OnnxConfig},
+    onnx_embedder, EthosConfig,
 };
 use pgvector::Vector;
 use sqlx::PgPool;
@@ -73,13 +69,11 @@ pub async fn embed_by_id(
         vector: Option<Vector>,
     }
 
-    let row: MemoryRow = sqlx::query_as(
-        "SELECT content, vector FROM memory_vectors WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| anyhow::anyhow!("Memory vector {} not found", id))?;
+    let row: MemoryRow = sqlx::query_as("SELECT content, vector FROM memory_vectors WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Memory vector {} not found", id))?;
 
     if row.vector.is_some() {
         tracing::debug!(id = %id, "Vector already populated, skipping");
@@ -251,9 +245,7 @@ mod tests {
 
         let mock_server = MockServer::start().await;
         Mock::given(method("POST"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(mock_embedding_response()),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(mock_embedding_response()))
             .mount(&mock_server)
             .await;
 
@@ -347,11 +339,9 @@ mod tests {
 
         let mock_server = MockServer::start().await;
         Mock::given(method("POST"))
-            .respond_with(
-                ResponseTemplate::new(500).set_body_json(serde_json::json!({
-                    "error": { "code": 500, "message": "Internal server error" }
-                })),
-            )
+            .respond_with(ResponseTemplate::new(500).set_body_json(serde_json::json!({
+                "error": { "code": 500, "message": "Internal server error" }
+            })))
             .mount(&mock_server)
             .await;
 
@@ -367,10 +357,7 @@ mod tests {
                 .await
                 .expect("Row not found");
 
-        assert!(
-            updated.0.is_none(),
-            "Vector should remain NULL on failure"
-        );
+        assert!(updated.0.is_none(), "Vector should remain NULL on failure");
 
         sqlx::query("DELETE FROM memory_vectors WHERE id = $1")
             .bind(row.0)

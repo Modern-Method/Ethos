@@ -9,9 +9,8 @@ pub mod onnx_embedder;
 
 pub use config::EthosConfig;
 pub use embeddings::{
-    BackendConfig, EmbeddingBackend, EmbeddingConfig, EmbeddingError, FallbackEmbeddingClient,
-    GeminiEmbeddingClient, OnnxConfig, GEMINI_DIMENSIONS, ONNX_DIMENSIONS,
-    create_backend,
+    create_backend, BackendConfig, EmbeddingBackend, EmbeddingConfig, EmbeddingError,
+    FallbackEmbeddingClient, GeminiEmbeddingClient, OnnxConfig, GEMINI_DIMENSIONS, ONNX_DIMENSIONS,
 };
 pub use error::EthosError;
 pub use graph::{ActivationNode, SpreadResult};

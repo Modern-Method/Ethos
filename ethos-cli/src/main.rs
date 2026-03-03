@@ -245,9 +245,15 @@ fn do_status(server: &str) -> anyhow::Result<()> {
     match resp {
         Ok(r) if r.status().is_success() => {
             let body: serde_json::Value = r.json().unwrap_or_default();
-            println!("Ethos server: {}", body["status"].as_str().unwrap_or("unknown"));
+            println!(
+                "Ethos server: {}",
+                body["status"].as_str().unwrap_or("unknown")
+            );
             println!("Version:      {}", body["version"].as_str().unwrap_or("?"));
-            println!("PostgreSQL:   {}", body["postgresql"].as_str().unwrap_or("?"));
+            println!(
+                "PostgreSQL:   {}",
+                body["postgresql"].as_str().unwrap_or("?")
+            );
             println!("pgvector:     {}", body["pgvector"].as_str().unwrap_or("?"));
             println!("Socket:       {}", body["socket"].as_str().unwrap_or("?"));
         }
@@ -274,10 +280,18 @@ fn main() {
     let server = cli.server.trim_end_matches('/').to_string();
 
     let result = match cli.command {
-        Commands::Search { query, limit, json, spreading }
-        | Commands::Query { query, limit, json, spreading } => {
-            do_search(&server, &query, limit, json, spreading)
+        Commands::Search {
+            query,
+            limit,
+            json,
+            spreading,
         }
+        | Commands::Query {
+            query,
+            limit,
+            json,
+            spreading,
+        } => do_search(&server, &query, limit, json, spreading),
         Commands::Status => do_status(&server),
     };
 
@@ -391,11 +405,7 @@ mod tests {
     #[test]
     fn test_qmd_snippet_content_truncation() {
         let long_content = "B".repeat(500);
-        let result = mock_result(
-            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-            &long_content,
-            0.5,
-        );
+        let result = mock_result("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", &long_content, 0.5);
         let qmd = to_qmd_result(&result);
 
         // snippet = "@@ -1,4 @@\n\n" + content[..300]
@@ -416,11 +426,7 @@ mod tests {
     fn test_qmd_json_array_serialization() {
         let results = vec![
             mock_result("7b5c24ab-1234-5678-9abc-def012345678", "First memory", 0.9),
-            mock_result(
-                "deadbeef-cafe-babe-face-feeddeadbeef",
-                "Second memory",
-                0.7,
-            ),
+            mock_result("deadbeef-cafe-babe-face-feeddeadbeef", "Second memory", 0.7),
         ];
 
         let qmd_results: Vec<QmdResult> = results.iter().map(to_qmd_result).collect();
@@ -450,10 +456,7 @@ mod tests {
             "file must start with 'ethos://memory/'"
         );
         assert!(
-            first["snippet"]
-                .as_str()
-                .unwrap()
-                .starts_with("@@ -1,4 @@"),
+            first["snippet"].as_str().unwrap().starts_with("@@ -1,4 @@"),
             "snippet must start with '@@ -1,4 @@'"
         );
     }
@@ -466,7 +469,10 @@ mod tests {
         let result = mock_result("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "", 0.5);
         let qmd = to_qmd_result(&result);
 
-        assert!(qmd.title.is_empty(), "Empty content should produce empty title");
+        assert!(
+            qmd.title.is_empty(),
+            "Empty content should produce empty title"
+        );
         assert!(
             qmd.snippet.starts_with("@@ -1,4 @@"),
             "Should still have snippet header"
@@ -500,7 +506,10 @@ mod tests {
         let qmd = to_qmd_result(&result);
 
         assert!(qmd.docid.starts_with('#'));
-        assert!(qmd.docid.len() >= 2, "docid should have at least # + 1 char");
+        assert!(
+            qmd.docid.len() >= 2,
+            "docid should have at least # + 1 char"
+        );
     }
 
     // ========================================================================
@@ -509,11 +518,7 @@ mod tests {
     #[test]
     fn test_qmd_title_uses_first_nonempty_line() {
         let content = "\n\nFirst real line\nSecond line";
-        let result = mock_result(
-            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-            content,
-            0.5,
-        );
+        let result = mock_result("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", content, 0.5);
         let qmd = to_qmd_result(&result);
         assert_eq!(qmd.title, "First real line");
     }

@@ -111,7 +111,10 @@ async fn main() -> anyhow::Result<()> {
                 ));
             }
             Err(e) => {
-                tracing::warn!("Re-embed worker skipped: failed to create embedding backend: {}", e);
+                tracing::warn!(
+                    "Re-embed worker skipped: failed to create embedding backend: {}",
+                    e
+                );
             }
         }
     } else {

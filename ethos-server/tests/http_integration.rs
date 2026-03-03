@@ -10,6 +10,7 @@ use ethos_server::http::{
     build_router, consolidate_inner, health_inner, ingest_inner, search_inner, ConsolidateRequest,
     HttpState, SearchRequest,
 };
+use pgvector::Vector;
 use serde_json::json;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -403,5 +404,164 @@ async fn test_search_with_spreading_http() {
 
     if status == StatusCode::OK {
         assert!(body["results"].is_array());
+    }
+}
+
+// ===========================================================================
+// TEST 11: /search scope filters work end-to-end via camelCase HTTP JSON
+// ===========================================================================
+#[tokio::test]
+async fn test_search_scope_filters_via_http_camel_case_json() {
+    let state = match make_http_state().await {
+        Some(s) => s,
+        None => {
+            eprintln!(
+                "Skipping test_search_scope_filters_via_http_camel_case_json: DB or config unavailable"
+            );
+            return;
+        }
+    };
+
+    let pool = state.pool.clone();
+    let scope = uuid::Uuid::new_v4().to_string();
+    let resource_id = format!("scope-resource-{scope}");
+    let thread_id = format!("scope-thread-{scope}");
+    let agent_id = format!("scope-agent-{scope}");
+    let other_resource_id = format!("scope-resource-other-{scope}");
+
+    let vec_data: Vec<f32> = (0..768).map(|i| (i as f32) / 768.0).collect();
+    let vector = Vector::from(vec_data);
+
+    let row_match: (uuid::Uuid,) = sqlx::query_as(
+        "INSERT INTO memory_vectors (content, source, vector, metadata) VALUES ($1, 'test', $2, $3) RETURNING id",
+    )
+    .bind(format!("http scope match {scope}"))
+    .bind(&vector)
+    .bind(json!({
+        "resourceId": resource_id.clone(),
+        "threadId": thread_id.clone(),
+        "agentId": agent_id.clone(),
+    }))
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to insert matching row");
+
+    let row_thread_alias: (uuid::Uuid,) = sqlx::query_as(
+        "INSERT INTO memory_vectors (content, source, vector, metadata) VALUES ($1, 'test', $2, $3) RETURNING id",
+    )
+    .bind(format!("http scope session alias {scope}"))
+    .bind(&vector)
+    .bind(json!({
+        "resource_id": resource_id.clone(),
+        "session_id": thread_id.clone(),
+        "agent_id": agent_id.clone(),
+    }))
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to insert session alias row");
+
+    let row_non_match: (uuid::Uuid,) = sqlx::query_as(
+        "INSERT INTO memory_vectors (content, source, vector, metadata) VALUES ($1, 'test', $2, $3) RETURNING id",
+    )
+    .bind(format!("http scope non-match {scope}"))
+    .bind(&vector)
+    .bind(json!({
+        "resourceId": other_resource_id,
+        "threadId": thread_id.clone(),
+        "agentId": agent_id.clone(),
+    }))
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to insert non-matching row");
+
+    let app = build_router(state);
+
+    let payload = json!({
+        "query": "scope filters over http",
+        "limit": 10,
+        "resourceId": resource_id,
+        "threadId": thread_id,
+        "agentId": agent_id
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/search")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_string(&payload).expect("search payload should serialize"),
+        ))
+        .expect("request should build");
+
+    let resp = app
+        .oneshot(req)
+        .await
+        .expect("/search request should complete");
+    let status = resp.status();
+    let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("response body should read");
+    let body_json: serde_json::Value =
+        serde_json::from_slice(&body_bytes).expect("response body should be valid JSON");
+
+    if status == StatusCode::INTERNAL_SERVER_ERROR {
+        eprintln!(
+            "Skipping test_search_scope_filters_via_http_camel_case_json: embedding backend unavailable ({})",
+            body_json
+        );
+
+        for id in [row_match.0, row_thread_alias.0, row_non_match.0] {
+            sqlx::query("DELETE FROM memory_vectors WHERE id = $1")
+                .bind(id)
+                .execute(&pool)
+                .await
+                .ok();
+        }
+        return;
+    }
+
+    assert_eq!(status, StatusCode::OK, "Expected 200 search response");
+
+    let results = body_json["results"]
+        .as_array()
+        .expect("results must be an array");
+    let ids: Vec<String> = results
+        .iter()
+        .filter_map(|item| item["id"].as_str().map(ToString::to_string))
+        .collect();
+
+    assert!(
+        ids.contains(&row_match.0.to_string()),
+        "Expected exact camelCase metadata row to match"
+    );
+    assert!(
+        ids.contains(&row_thread_alias.0.to_string()),
+        "Expected session_id alias row to match threadId filter"
+    );
+    assert!(
+        !ids.contains(&row_non_match.0.to_string()),
+        "Non-matching resourceId row should be filtered out"
+    );
+
+    for item in results {
+        if let Some(retrieval) = item.get("retrieval") {
+            assert_eq!(
+                item.get("metadata_scores"),
+                Some(retrieval),
+                "metadata_scores should remain a back-compat alias of retrieval"
+            );
+            assert!(
+                item.get("metadata_score").is_none(),
+                "metadata_score should no longer be returned"
+            );
+        }
+    }
+
+    for id in [row_match.0, row_thread_alias.0, row_non_match.0] {
+        sqlx::query("DELETE FROM memory_vectors WHERE id = $1")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .ok();
     }
 }

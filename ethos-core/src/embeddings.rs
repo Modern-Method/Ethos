@@ -138,9 +138,7 @@ pub enum BackendConfig {
 pub fn create_backend(config: BackendConfig) -> Result<Box<dyn EmbeddingBackend>, EmbeddingError> {
     match config {
         BackendConfig::Gemini(c) => Ok(Box::new(GeminiEmbeddingClient::new(c)?)),
-        BackendConfig::Onnx(c) => {
-            Ok(Box::new(crate::onnx_embedder::OnnxEmbeddingClient::new(c)?))
-        }
+        BackendConfig::Onnx(c) => Ok(Box::new(crate::onnx_embedder::OnnxEmbeddingClient::new(c)?)),
         BackendConfig::GeminiFallbackOnnx(c) => Ok(Box::new(FallbackEmbeddingClient::new(c)?)),
     }
 }
@@ -209,9 +207,7 @@ impl GeminiEmbeddingClient {
             return Err(EmbeddingError::MissingApiKey);
         }
 
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()?;
+        let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
 
         Ok(Self {
             client,
@@ -229,9 +225,7 @@ impl GeminiEmbeddingClient {
             return Err(EmbeddingError::MissingApiKey);
         }
 
-        let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()?;
+        let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
 
         Ok(Self {
             client,
@@ -242,7 +236,8 @@ impl GeminiEmbeddingClient {
 
     /// Generate an embedding for the given text (direct call, returns raw Vec)
     pub async fn embed_raw(&self, text: &str) -> Result<Vec<f32>, EmbeddingError> {
-        self.embed_with_task(text, TaskType::RetrievalDocument).await
+        self.embed_with_task(text, TaskType::RetrievalDocument)
+            .await
     }
 
     /// Generate an embedding with a specific task type
@@ -367,7 +362,10 @@ impl FallbackEmbeddingClient {
     }
 
     #[cfg(test)]
-    pub fn with_base_url(config: EmbeddingConfig, base_url: String) -> Result<Self, EmbeddingError> {
+    pub fn with_base_url(
+        config: EmbeddingConfig,
+        base_url: String,
+    ) -> Result<Self, EmbeddingError> {
         Ok(Self {
             inner: GeminiEmbeddingClient::with_base_url(config, base_url)?,
         })
@@ -390,7 +388,11 @@ impl EmbeddingBackend for FallbackEmbeddingClient {
     }
 
     async fn embed_query(&self, text: &str) -> Result<Option<Vec<f32>>, EmbeddingError> {
-        match self.inner.embed_with_task(text, TaskType::RetrievalQuery).await {
+        match self
+            .inner
+            .embed_with_task(text, TaskType::RetrievalQuery)
+            .await
+        {
             Ok(v) => Ok(Some(v)),
             Err(e) => {
                 tracing::warn!(
@@ -444,9 +446,8 @@ mod tests {
     async fn test_embed_content_calls_api_and_returns_768_dim_vector() {
         let mock_server = MockServer::start().await;
         let config = test_config("test-api-key");
-        let client =
-            GeminiEmbeddingClient::with_base_url(config, mock_server.uri())
-                .expect("Failed to create client");
+        let client = GeminiEmbeddingClient::with_base_url(config, mock_server.uri())
+            .expect("Failed to create client");
 
         Mock::given(method("POST"))
             .and(path("/models/gemini-embedding-001:embedContent"))
@@ -457,9 +458,7 @@ mod tests {
                 "taskType": "RETRIEVAL_DOCUMENT",
                 "outputDimensionality": 768
             })))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(mock_embedding_response()),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(mock_embedding_response()))
             .mount(&mock_server)
             .await;
 
@@ -474,9 +473,8 @@ mod tests {
     async fn test_embed_returns_error_on_api_500() {
         let mock_server = MockServer::start().await;
         let config = test_config("test-api-key");
-        let client =
-            GeminiEmbeddingClient::with_base_url(config, mock_server.uri())
-                .expect("Failed to create client");
+        let client = GeminiEmbeddingClient::with_base_url(config, mock_server.uri())
+            .expect("Failed to create client");
 
         Mock::given(method("POST"))
             .respond_with(ResponseTemplate::new(500).set_body_json(serde_json::json!({
@@ -500,9 +498,8 @@ mod tests {
     async fn test_embed_retries_on_429_then_succeeds() {
         let mock_server = MockServer::start().await;
         let config = test_config("test-api-key");
-        let client =
-            GeminiEmbeddingClient::with_base_url(config, mock_server.uri())
-                .expect("Failed to create client");
+        let client = GeminiEmbeddingClient::with_base_url(config, mock_server.uri())
+            .expect("Failed to create client");
 
         Mock::given(method("POST"))
             .respond_with(ResponseTemplate::new(429).set_body_json(serde_json::json!({
@@ -513,9 +510,7 @@ mod tests {
             .await;
 
         Mock::given(method("POST"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(mock_embedding_response()),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(mock_embedding_response()))
             .mount(&mock_server)
             .await;
 
@@ -542,9 +537,8 @@ mod tests {
     async fn test_embed_returns_error_on_wrong_dimensions() {
         let mock_server = MockServer::start().await;
         let config = test_config("test-api-key");
-        let client =
-            GeminiEmbeddingClient::with_base_url(config, mock_server.uri())
-                .expect("Failed to create client");
+        let client = GeminiEmbeddingClient::with_base_url(config, mock_server.uri())
+            .expect("Failed to create client");
 
         let wrong_response = serde_json::json!({
             "embedding": {
@@ -578,14 +572,11 @@ mod tests {
     async fn test_gemini_backend_trait_returns_some() {
         let mock_server = MockServer::start().await;
         let config = test_config("test-api-key");
-        let backend: Box<dyn EmbeddingBackend> = Box::new(
-            GeminiEmbeddingClient::with_base_url(config, mock_server.uri()).unwrap(),
-        );
+        let backend: Box<dyn EmbeddingBackend> =
+            Box::new(GeminiEmbeddingClient::with_base_url(config, mock_server.uri()).unwrap());
 
         Mock::given(method("POST"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(mock_embedding_response()),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(mock_embedding_response()))
             .mount(&mock_server)
             .await;
 
@@ -617,7 +608,10 @@ mod tests {
 
         let result = fallback.embed("hello").await;
         assert!(result.is_ok(), "Fallback should not propagate errors");
-        assert!(result.unwrap().is_none(), "Fallback should return None on error");
+        assert!(
+            result.unwrap().is_none(),
+            "Fallback should return None on error"
+        );
         assert_eq!(fallback.name(), "gemini-fallback-onnx");
     }
 
@@ -628,9 +622,7 @@ mod tests {
         let fallback = FallbackEmbeddingClient::with_base_url(config, mock_server.uri()).unwrap();
 
         Mock::given(method("POST"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(mock_embedding_response()),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(mock_embedding_response()))
             .mount(&mock_server)
             .await;
 

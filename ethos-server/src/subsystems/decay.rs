@@ -178,13 +178,23 @@ async fn decay_memory_vectors(pool: &PgPool, config: &DecayConfig) -> Result<Dec
     let mut stats = DecayStats::default();
 
     // Fetch non-pruned vectors (batch of 500)
-    let rows = sqlx::query_as::<_, (Uuid, Option<f64>, Option<i32>, Option<DateTime<Utc>>, DateTime<Utc>, Option<DateTime<Utc>>)>(
+    let rows = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            Option<f64>,
+            Option<i32>,
+            Option<DateTime<Utc>>,
+            DateTime<Utc>,
+            Option<DateTime<Utc>>,
+        ),
+    >(
         r#"
         SELECT id, importance, access_count, last_accessed, created_at, expires_at
         FROM memory_vectors
         WHERE (pruned = false OR pruned IS NULL)
         LIMIT 500
-        "#
+        "#,
     )
     .fetch_all(pool)
     .await?;
@@ -196,20 +206,23 @@ async fn decay_memory_vectors(pool: &PgPool, config: &DecayConfig) -> Result<Dec
         // Check if expired
         if let Some(exp) = expires_at {
             if exp <= Utc::now() {
-                sqlx::query!(
-                    "UPDATE memory_vectors SET pruned = true WHERE id = $1",
-                    id
-                )
-                .execute(pool)
-                .await?;
+                sqlx::query!("UPDATE memory_vectors SET pruned = true WHERE id = $1", id)
+                    .execute(pool)
+                    .await?;
                 stats.pruned += 1;
                 continue;
             }
         }
 
         // Calculate new salience (no emotional tone for vectors)
-        let new_salience =
-            calculate_salience(current_salience, retrieval_count, created_at, last_accessed, 0.0, config);
+        let new_salience = calculate_salience(
+            current_salience,
+            retrieval_count,
+            created_at,
+            last_accessed,
+            0.0,
+            config,
+        );
 
         if new_salience < config.prune_threshold {
             sqlx::query!(
@@ -296,19 +309,31 @@ async fn decay_semantic_facts(pool: &PgPool, config: &DecayConfig) -> Result<Dec
         FROM semantic_facts
         WHERE pruned = false AND superseded_by IS NULL
         LIMIT 500
-        "#
+        "#,
     )
     .fetch_all(pool)
     .await?;
 
     for (id, confidence, salience, retrieval_count, last_accessed, created_at) in rows {
         // Decay confidence
-        let new_confidence =
-            calculate_salience(confidence, retrieval_count, created_at, last_accessed, 0.0, config);
+        let new_confidence = calculate_salience(
+            confidence,
+            retrieval_count,
+            created_at,
+            last_accessed,
+            0.0,
+            config,
+        );
 
         // Decay salience
-        let new_salience =
-            calculate_salience(salience, retrieval_count, created_at, last_accessed, 0.0, config);
+        let new_salience = calculate_salience(
+            salience,
+            retrieval_count,
+            created_at,
+            last_accessed,
+            0.0,
+            config,
+        );
 
         if new_confidence < config.prune_threshold {
             sqlx::query!(
@@ -549,11 +574,12 @@ mod tests {
             .expect("Decay sweep failed");
 
         // Verify memory was pruned
-        let pruned: bool = sqlx::query_scalar("SELECT COALESCE(pruned, false) FROM memory_vectors WHERE id = $1")
-            .bind(id)
-            .fetch_one(&pool)
-            .await
-            .expect("Failed to check pruned status");
+        let pruned: bool =
+            sqlx::query_scalar("SELECT COALESCE(pruned, false) FROM memory_vectors WHERE id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .expect("Failed to check pruned status");
 
         assert!(pruned, "Stale memory should be marked as pruned");
 
@@ -599,20 +625,22 @@ mod tests {
             .expect("Decay sweep failed");
 
         // Verify memory was NOT pruned
-        let pruned: bool = sqlx::query_scalar("SELECT COALESCE(pruned, false) FROM memory_vectors WHERE id = $1")
-            .bind(id)
-            .fetch_one(&pool)
-            .await
-            .expect("Failed to check pruned status");
+        let pruned: bool =
+            sqlx::query_scalar("SELECT COALESCE(pruned, false) FROM memory_vectors WHERE id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .expect("Failed to check pruned status");
 
         assert!(!pruned, "Fresh memory should NOT be pruned");
 
         // Verify importance is still above threshold
-        let importance: f64 = sqlx::query_scalar("SELECT importance FROM memory_vectors WHERE id = $1")
-            .bind(id)
-            .fetch_one(&pool)
-            .await
-            .expect("Failed to check importance");
+        let importance: f64 =
+            sqlx::query_scalar("SELECT importance FROM memory_vectors WHERE id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .expect("Failed to check importance");
 
         assert!(
             importance > config.prune_threshold,
@@ -642,14 +670,12 @@ mod tests {
 
         // Insert episodic_trace with old access but high retrieval_count
         let session_id = Uuid::new_v4();
-        sqlx::query(
-            "INSERT INTO sessions (id, session_key, agent_id) VALUES ($1, $2, 'test')",
-        )
-        .bind(session_id)
-        .bind(format!("test-ltp-{}", session_id))
-        .execute(&pool)
-        .await
-        .ok();
+        sqlx::query("INSERT INTO sessions (id, session_key, agent_id) VALUES ($1, $2, 'test')")
+            .bind(session_id)
+            .bind(format!("test-ltp-{}", session_id))
+            .execute(&pool)
+            .await
+            .ok();
 
         let id: Uuid = sqlx::query_scalar(
             r#"
@@ -681,7 +707,10 @@ mod tests {
             .await
             .expect("Failed to check pruned status");
 
-        assert!(!pruned, "Memory with LTP (high retrieval_count) should NOT be pruned");
+        assert!(
+            !pruned,
+            "Memory with LTP (high retrieval_count) should NOT be pruned"
+        );
 
         // Cleanup
         sqlx::query("DELETE FROM episodic_traces WHERE id = $1")
@@ -708,14 +737,12 @@ mod tests {
 
         // Create test session and episode
         let session_id = Uuid::new_v4();
-        sqlx::query(
-            "INSERT INTO sessions (id, session_key, agent_id) VALUES ($1, $2, 'test')",
-        )
-        .bind(session_id)
-        .bind(format!("test-retrieval-{}", session_id))
-        .execute(&pool)
-        .await
-        .ok();
+        sqlx::query("INSERT INTO sessions (id, session_key, agent_id) VALUES ($1, $2, 'test')")
+            .bind(session_id)
+            .bind(format!("test-retrieval-{}", session_id))
+            .execute(&pool)
+            .await
+            .ok();
 
         let id: Uuid = sqlx::query_scalar(
             r#"
@@ -816,7 +843,10 @@ mod tests {
             .expect("Decay sweep failed");
 
         // Report should have non-zero counts
-        assert!(report.vectors_updated > 0 || report.vectors_pruned > 0, "Report should show activity");
+        assert!(
+            report.vectors_updated > 0 || report.vectors_pruned > 0,
+            "Report should show activity"
+        );
         assert!(report.elapsed_ms > 0, "Report should have elapsed time");
 
         // Cleanup
@@ -928,8 +958,16 @@ mod tests {
 
         assert_eq!(retrieval_count, 1);
         assert!(last_retrieved_at.is_some());
-        assert!(confidence > 0.75, "confidence should be boosted, got {}", confidence);
-        assert!(salience > 0.75, "salience should be boosted, got {}", salience);
+        assert!(
+            confidence > 0.75,
+            "confidence should be boosted, got {}",
+            confidence
+        );
+        assert!(
+            salience > 0.75,
+            "salience should be boosted, got {}",
+            salience
+        );
 
         // Cleanup
         sqlx::query("DELETE FROM semantic_facts WHERE id = $1")
@@ -971,18 +1009,24 @@ mod tests {
             .expect("record_retrieval failed");
 
         // Verify access_count incremented
-        let (access_count, last_accessed, importance): (Option<i32>, Option<DateTime<Utc>>, Option<f64>) =
-            sqlx::query_as(
-                "SELECT access_count, last_accessed, importance FROM memory_vectors WHERE id = $1",
-            )
-            .bind(id)
-            .fetch_one(&pool)
-            .await
-            .expect("Failed to fetch vector");
+        let (access_count, last_accessed, importance): (
+            Option<i32>,
+            Option<DateTime<Utc>>,
+            Option<f64>,
+        ) = sqlx::query_as(
+            "SELECT access_count, last_accessed, importance FROM memory_vectors WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to fetch vector");
 
         assert_eq!(access_count.unwrap_or(0), 1, "access_count should be 1");
         assert!(last_accessed.is_some(), "last_accessed should be set");
-        assert!(importance.unwrap_or(0.5) >= 0.5, "importance should not decrease");
+        assert!(
+            importance.unwrap_or(0.5) >= 0.5,
+            "importance should not decrease"
+        );
 
         // Cleanup
         sqlx::query("DELETE FROM memory_vectors WHERE id = $1")
@@ -1026,13 +1070,12 @@ mod tests {
             .expect("Decay sweep failed");
 
         // Verify memory was pruned due to expiration
-        let pruned: bool = sqlx::query_scalar(
-            "SELECT COALESCE(pruned, false) FROM memory_vectors WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_one(&pool)
-        .await
-        .expect("Failed to check pruned status");
+        let pruned: bool =
+            sqlx::query_scalar("SELECT COALESCE(pruned, false) FROM memory_vectors WHERE id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .expect("Failed to check pruned status");
 
         assert!(pruned, "Expired memory should be pruned");
 
@@ -1057,14 +1100,12 @@ mod tests {
         let config = create_test_config();
 
         let session_id = Uuid::new_v4();
-        sqlx::query(
-            "INSERT INTO sessions (id, session_key, agent_id) VALUES ($1, $2, 'test')",
-        )
-        .bind(session_id)
-        .bind(format!("test-stale-ep-{}", session_id))
-        .execute(&pool)
-        .await
-        .ok();
+        sqlx::query("INSERT INTO sessions (id, session_key, agent_id) VALUES ($1, $2, 'test')")
+            .bind(session_id)
+            .bind(format!("test-stale-ep-{}", session_id))
+            .execute(&pool)
+            .await
+            .ok();
 
         // Insert episodic trace with very low salience and very old access
         let id: Uuid = sqlx::query_scalar(
@@ -1089,18 +1130,28 @@ mod tests {
             .expect("Decay sweep failed");
 
         // Verify episode was pruned
-        let pruned: bool =
-            sqlx::query_scalar("SELECT pruned FROM episodic_traces WHERE id = $1")
-                .bind(id)
-                .fetch_one(&pool)
-                .await
-                .expect("Failed to check pruned");
+        let pruned: bool = sqlx::query_scalar("SELECT pruned FROM episodic_traces WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("Failed to check pruned");
 
-        assert!(pruned, "Very stale episode with low salience should be pruned");
+        assert!(
+            pruned,
+            "Very stale episode with low salience should be pruned"
+        );
 
         // Cleanup
-        sqlx::query("DELETE FROM episodic_traces WHERE id = $1").bind(id).execute(&pool).await.ok();
-        sqlx::query("DELETE FROM sessions WHERE id = $1").bind(session_id).execute(&pool).await.ok();
+        sqlx::query("DELETE FROM episodic_traces WHERE id = $1")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .ok();
+        sqlx::query("DELETE FROM sessions WHERE id = $1")
+            .bind(session_id)
+            .execute(&pool)
+            .await
+            .ok();
     }
 
     // ========================================================================
@@ -1139,14 +1190,16 @@ mod tests {
             .expect("Decay sweep failed");
 
         // Verify fact was pruned
-        let pruned: bool =
-            sqlx::query_scalar("SELECT pruned FROM semantic_facts WHERE id = $1")
-                .bind(id)
-                .fetch_one(&pool)
-                .await
-                .expect("Failed to check pruned");
+        let pruned: bool = sqlx::query_scalar("SELECT pruned FROM semantic_facts WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("Failed to check pruned");
 
-        assert!(pruned, "Very stale fact with low confidence should be pruned");
+        assert!(
+            pruned,
+            "Very stale fact with low confidence should be pruned"
+        );
 
         // Cleanup
         sqlx::query("DELETE FROM semantic_facts WHERE id = $1")

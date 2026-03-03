@@ -1,12 +1,14 @@
 use ethos_core::ipc::EthosRequest;
-use sqlx::PgPool;
-use serde_json::json;
 use ethos_server::router;
+use serde_json::json;
+use sqlx::PgPool;
 
 #[tokio::test]
 async fn test_ingest_session_events() {
     let database_url = "postgresql://ethos:ethos_dev@localhost:5432/ethos";
-    let pool = PgPool::connect(database_url).await.expect("Failed to connect to Postgres");
+    let pool = PgPool::connect(database_url)
+        .await
+        .expect("Failed to connect to Postgres");
 
     // Clean up before test
     sqlx::query!("DELETE FROM session_events WHERE session_id = 'test-session'")
@@ -45,7 +47,9 @@ async fn test_ingest_session_events() {
 #[tokio::test]
 async fn test_ingest_memory_vectors() {
     let database_url = "postgresql://ethos:ethos_dev@localhost:5432/ethos";
-    let pool = PgPool::connect(database_url).await.expect("Failed to connect to Postgres");
+    let pool = PgPool::connect(database_url)
+        .await
+        .expect("Failed to connect to Postgres");
 
     // Clean up
     sqlx::query!("DELETE FROM memory_vectors WHERE source = 'test-source'")
@@ -68,7 +72,7 @@ async fn test_ingest_memory_vectors() {
     // Verify DB write
     // Use query_as! or a manual query to avoid vector mapping issues for now
     let row: (Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT content, source FROM memory_vectors WHERE content = 'memory context'"
+        "SELECT content, source FROM memory_vectors WHERE content = 'memory context'",
     )
     .fetch_one(&pool)
     .await
@@ -81,7 +85,9 @@ async fn test_ingest_memory_vectors() {
 #[tokio::test]
 async fn test_assistant_role_mapping() {
     let database_url = "postgresql://ethos:ethos_dev@localhost:5432/ethos";
-    let pool = PgPool::connect(database_url).await.expect("Failed to connect to Postgres");
+    let pool = PgPool::connect(database_url)
+        .await
+        .expect("Failed to connect to Postgres");
 
     let payload = json!({
         "content": "bot response",
@@ -94,12 +100,10 @@ async fn test_assistant_role_mapping() {
     let request = EthosRequest::Ingest { payload };
     let _ = router::handle_request(request, &pool).await;
 
-    let row = sqlx::query!(
-        "SELECT role FROM session_events WHERE session_id = 'test-role-map'"
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let row = sqlx::query!("SELECT role FROM session_events WHERE session_id = 'test-role-map'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
     assert_eq!(row.role, "assistant");
 }
@@ -107,7 +111,9 @@ async fn test_assistant_role_mapping() {
 #[tokio::test]
 async fn test_malformed_payload() {
     let database_url = "postgresql://ethos:ethos_dev@localhost:5432/ethos";
-    let pool = PgPool::connect(database_url).await.expect("Failed to connect to Postgres");
+    let pool = PgPool::connect(database_url)
+        .await
+        .expect("Failed to connect to Postgres");
 
     let payload = json!({});
 

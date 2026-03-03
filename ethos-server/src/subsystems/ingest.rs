@@ -1,7 +1,7 @@
-use sqlx::PgPool;
-use serde_json::Value;
-use uuid::Uuid;
 use crate::subsystems::embedder;
+use serde_json::Value;
+use sqlx::PgPool;
+use uuid::Uuid;
 
 pub async fn ingest_payload(payload: Value, pool: &PgPool) -> anyhow::Result<()> {
     ingest_payload_with_embedding(payload, pool, None).await?;
@@ -84,7 +84,10 @@ pub async fn ingest_payload_with_embedding(
 
     tx.commit().await?;
 
-    tracing::info!("Successfully ingested payload into DB, memory_id: {}", memory_id);
+    tracing::info!(
+        "Successfully ingested payload into DB, memory_id: {}",
+        memory_id
+    );
 
     // 3. Spawn embedding task in background (non-blocking)
     if let Some(cfg) = config {

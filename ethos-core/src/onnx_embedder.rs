@@ -69,9 +69,9 @@ impl EmbeddingBackend for OnnxEmbeddingClient {
         let text = text.to_string();
 
         let result = tokio::task::spawn_blocking(move || {
-            let mut session_guard = session
-                .lock()
-                .map_err(|e| EmbeddingError::OnnxInference(format!("session lock poisoned: {e}")))?;
+            let mut session_guard = session.lock().map_err(|e| {
+                EmbeddingError::OnnxInference(format!("session lock poisoned: {e}"))
+            })?;
             embed_sync(&mut session_guard, &tokenizer, &text, dimensions)
         })
         .await
@@ -107,11 +107,7 @@ fn embed_sync(
         .iter()
         .map(|&m| m as i64)
         .collect();
-    let token_type_ids: Vec<i64> = encoding
-        .get_type_ids()
-        .iter()
-        .map(|&t| t as i64)
-        .collect();
+    let token_type_ids: Vec<i64> = encoding.get_type_ids().iter().map(|&t| t as i64).collect();
 
     let seq_len = input_ids.len();
     let shape = vec![1i64, seq_len as i64];

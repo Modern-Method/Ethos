@@ -30,7 +30,7 @@ fn create_test_client(mock_server: &MockServer) -> GeminiEmbeddingClient {
         max_retries: 1,
         retry_delay_ms: 10,
     };
-    
+
     GeminiEmbeddingClient::with_base_url(config, mock_server.uri())
         .expect("Failed to create test client")
 }
@@ -53,42 +53,40 @@ async fn test_manual_embed_trigger_via_ipc() {
     .expect("Failed to insert test row");
 
     // Verify vector is initially NULL
-    let before: (Option<Vector>,) = sqlx::query_as(
-        "SELECT vector FROM memory_vectors WHERE id = $1"
-    )
-    .bind(row.0)
-    .fetch_one(&pool)
-    .await
-    .expect("Row not found");
+    let before: (Option<Vector>,) =
+        sqlx::query_as("SELECT vector FROM memory_vectors WHERE id = $1")
+            .bind(row.0)
+            .fetch_one(&pool)
+            .await
+            .expect("Row not found");
     assert!(before.0.is_none(), "Vector should start as NULL");
 
     // Start mock server
     let mock_server = MockServer::start().await;
     Mock::given(method("POST"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(mock_embedding_response())
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_embedding_response()))
         .mount(&mock_server)
         .await;
 
     // Test embed_by_id directly
     let client = create_test_client(&mock_server);
     let result = embedder::embed_by_id(row.0, &pool, &client).await;
-    
+
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result.err());
     assert!(result.unwrap(), "Expected true (embedded)");
 
     // Verify vector was written
-    let updated: (Option<Vector>,) = sqlx::query_as(
-        "SELECT vector FROM memory_vectors WHERE id = $1"
-    )
-    .bind(row.0)
-    .fetch_one(&pool)
-    .await
-    .expect("Row not found");
+    let updated: (Option<Vector>,) =
+        sqlx::query_as("SELECT vector FROM memory_vectors WHERE id = $1")
+            .bind(row.0)
+            .fetch_one(&pool)
+            .await
+            .expect("Row not found");
 
-    assert!(updated.0.is_some(), "Vector should be populated after embed");
+    assert!(
+        updated.0.is_some(),
+        "Vector should be populated after embed"
+    );
 
     // Cleanup
     sqlx::query("DELETE FROM memory_vectors WHERE id = $1")
@@ -108,7 +106,7 @@ async fn test_vector_stays_null_on_api_failure() {
     // Insert a row without vector
     let content = "content that will fail";
     let row: (uuid::Uuid,) = sqlx::query_as(
-        "INSERT INTO memory_vectors (content, source) VALUES ($1, 'test-api-failure') RETURNING id"
+        "INSERT INTO memory_vectors (content, source) VALUES ($1, 'test-api-failure') RETURNING id",
     )
     .bind(content)
     .fetch_one(&pool)
@@ -118,28 +116,24 @@ async fn test_vector_stays_null_on_api_failure() {
     // Mock API error
     let mock_server = MockServer::start().await;
     Mock::given(method("POST"))
-        .respond_with(
-            ResponseTemplate::new(500)
-                .set_body_json(json!({
-                    "error": { "code": 500, "message": "Internal server error" }
-                }))
-        )
+        .respond_with(ResponseTemplate::new(500).set_body_json(json!({
+            "error": { "code": 500, "message": "Internal server error" }
+        })))
         .mount(&mock_server)
         .await;
 
     let client = create_test_client(&mock_server);
     let result = embedder::embed_by_id(row.0, &pool, &client).await;
-    
+
     assert!(result.is_err(), "Expected error on API failure");
 
     // Verify vector is still NULL
-    let after: (Option<Vector>,) = sqlx::query_as(
-        "SELECT vector FROM memory_vectors WHERE id = $1"
-    )
-    .bind(row.0)
-    .fetch_one(&pool)
-    .await
-    .expect("Row not found");
+    let after: (Option<Vector>,) =
+        sqlx::query_as("SELECT vector FROM memory_vectors WHERE id = $1")
+            .bind(row.0)
+            .fetch_one(&pool)
+            .await
+            .expect("Row not found");
 
     assert!(after.0.is_none(), "Vector should remain NULL on failure");
 
@@ -154,7 +148,7 @@ async fn test_vector_stays_null_on_api_failure() {
 #[tokio::test]
 async fn test_vector_written_to_db_after_ingest() {
     // This test verifies that embed_by_id works correctly
-    
+
     let database_url = "postgresql://ethos:ethos_dev@localhost:5432/ethos";
     let pool = PgPool::connect(database_url)
         .await
@@ -178,28 +172,27 @@ async fn test_vector_written_to_db_after_ingest() {
     // Mock API
     let mock_server = MockServer::start().await;
     Mock::given(method("POST"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(mock_embedding_response())
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_embedding_response()))
         .mount(&mock_server)
         .await;
 
     let client = create_test_client(&mock_server);
     let result = embedder::embed_by_id(row.0, &pool, &client).await;
-    
+
     assert!(result.is_ok(), "Embedding should succeed");
 
     // Verify vector is populated
-    let after: (Option<Vector>,) = sqlx::query_as(
-        "SELECT vector FROM memory_vectors WHERE id = $1"
-    )
-    .bind(row.0)
-    .fetch_one(&pool)
-    .await
-    .expect("Row not found");
+    let after: (Option<Vector>,) =
+        sqlx::query_as("SELECT vector FROM memory_vectors WHERE id = $1")
+            .bind(row.0)
+            .fetch_one(&pool)
+            .await
+            .expect("Row not found");
 
-    assert!(after.0.is_some(), "Vector should be populated after embedding");
+    assert!(
+        after.0.is_some(),
+        "Vector should be populated after embedding"
+    );
 
     // Cleanup
     sqlx::query("DELETE FROM memory_vectors WHERE id = $1")

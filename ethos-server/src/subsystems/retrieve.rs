@@ -32,7 +32,6 @@ pub struct SearchResult {
     pub score: f64,
     pub metadata: serde_json::Value,
     pub retrieval: RetrievalScores,
-    pub metadata_score: RetrievalScores,
     pub metadata_scores: RetrievalScores,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
@@ -111,17 +110,13 @@ pub async fn search_memory(
             tracing::warn!(
                 "Embedding backend returned None for query — cannot perform vector search"
             );
-            return Ok(serde_json::json!({
-                "status": "error",
-                "error": "Embedding unavailable — vector search requires a working embedding backend"
-            }));
+            return Err(anyhow::anyhow!(
+                "Embedding unavailable — vector search requires a working embedding backend"
+            ));
         }
         Err(e) => {
             tracing::error!(error = %e, "Failed to embed query");
-            return Ok(serde_json::json!({
-                "status": "error",
-                "error": format!("Failed to embed query: {}", e)
-            }));
+            return Err(anyhow::anyhow!("Failed to embed query: {}", e));
         }
     };
 
@@ -245,7 +240,6 @@ pub async fn search_memory(
                 score: node.final_score as f64,
                 metadata: metadata.clone(),
                 retrieval,
-                metadata_score: retrieval,
                 metadata_scores: retrieval,
                 created_at: *created_at,
             })
@@ -915,9 +909,9 @@ mod tests {
 
         let backend = create_test_backend(&mock_server);
 
-        // Search should fail gracefully
+        // Search should surface an actual error (not an {status:error} payload)
         let config = create_test_config();
-        let result = search_memory(
+        let error = search_memory(
             "test query".to_string(),
             Some(5),
             false,
@@ -927,18 +921,12 @@ mod tests {
             &config,
         )
         .await
-        .expect("Should not panic on embedding failure");
+        .expect_err("Embedding failure should return Err");
 
-        // Should return error status
-        let status = result.get("status").and_then(|s| s.as_str());
-        assert_eq!(
-            status,
-            Some("error"),
-            "Should return error status on embedding failure"
+        assert!(
+            error.to_string().contains("Failed to embed query"),
+            "Unexpected error: {error}"
         );
-
-        let error = result.get("error").and_then(|e| e.as_str());
-        assert!(error.is_some(), "Should have error message");
     }
 
     // ========================================================================
@@ -1208,9 +1196,9 @@ mod tests {
             first["metadata_scores"], first["retrieval"],
             "metadata_scores alias should match retrieval score breakdown"
         );
-        assert_eq!(
-            first["metadata_score"], first["retrieval"],
-            "metadata_score alias should match retrieval score breakdown"
+        assert!(
+            first.get("metadata_score").is_none(),
+            "legacy metadata_score field should no longer be returned"
         );
         assert!(
             first["retrieval"]["cosine_score"].is_number()

@@ -223,7 +223,10 @@ pub async fn spread_activation(
 }
 
 /// Load edges from memory_graph_links for the given node IDs
-async fn load_subgraph_edges(pool: &PgPool, node_ids: &[Uuid]) -> Result<Vec<GraphEdge>, EthosError> {
+async fn load_subgraph_edges(
+    pool: &PgPool,
+    node_ids: &[Uuid],
+) -> Result<Vec<GraphEdge>, EthosError> {
     let rows = sqlx::query_as::<_, (Uuid, Uuid, String, f32)>(
         r#"
         SELECT from_id, to_id, to_type, weight
@@ -232,7 +235,7 @@ async fn load_subgraph_edges(pool: &PgPool, node_ids: &[Uuid]) -> Result<Vec<Gra
            OR to_id = ANY($1)
         ORDER BY weight DESC
         LIMIT $2
-        "#
+        "#,
     )
     .bind(node_ids)
     .bind(MAX_EDGES)
@@ -332,7 +335,7 @@ mod tests {
         // Neighbor should have received activation
         let neighbor_node = result.nodes.iter().find(|n| n.id == neighbor_id);
         assert!(neighbor_node.is_some());
-        
+
         let neighbor = neighbor_node.unwrap();
         // spread_score = 1.0 * 0.5 * 0.85 * 3 iterations (accumulated)
         assert!(neighbor.spread_score > 0.0);
@@ -473,7 +476,7 @@ mod tests {
         // Target should have accumulated activation from both anchors
         let target_node = result.nodes.iter().find(|n| n.id == target);
         assert!(target_node.is_some());
-        
+
         let target = target_node.unwrap();
         // Both anchors contribute to target's activation
         assert!(target.spread_score > 0.0);

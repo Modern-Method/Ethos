@@ -1,6 +1,9 @@
 use crate::router;
 use bytes::Bytes;
-use ethos_core::{ipc::{EthosRequest, EthosResponse}, EthosConfig};
+use ethos_core::{
+    ipc::{EthosRequest, EthosResponse},
+    EthosConfig,
+};
 use futures::{SinkExt, StreamExt};
 use sqlx::PgPool;
 use std::path::Path;

@@ -46,7 +46,7 @@ pub async fn link_memory(
         SELECT vector
         FROM memory_vectors
         WHERE source_type = $1 AND source_id = $2
-        "#
+        "#,
     )
     .bind(source_type)
     .bind(source_id)
@@ -72,7 +72,7 @@ pub async fn link_memory(
           AND vector IS NOT NULL
         ORDER BY vector <=> $1::vector
         LIMIT $4
-        "#
+        "#,
     )
     .bind(&vector)
     .bind(source_type)
@@ -96,15 +96,15 @@ pub async fn link_memory(
                 DO UPDATE SET 
                     weight = LEAST($6, memory_graph_links.weight + $7),
                     updated_at = now()
-                "#
+                "#,
             )
             .bind(source_type)
             .bind(source_id)
             .bind(&target_type)
             .bind(target_id)
-            .bind(score)              // Initial weight for new edges
-            .bind(MAX_WEIGHT)         // Max weight cap
-            .bind(WEIGHT_INCREMENT)   // Strengthening increment
+            .bind(score) // Initial weight for new edges
+            .bind(MAX_WEIGHT) // Max weight cap
+            .bind(WEIGHT_INCREMENT) // Strengthening increment
             .execute(pool)
             .await?;
 
@@ -124,7 +124,7 @@ pub async fn link_memory(
           AND 1 - (vector <=> $1::vector) >= $4
         ORDER BY vector <=> $1::vector
         LIMIT $5
-        "#
+        "#,
     )
     .bind(&vector)
     .bind(source_type)
@@ -144,7 +144,7 @@ pub async fn link_memory(
             DO UPDATE SET 
                 weight = LEAST($6, memory_graph_links.weight + $7),
                 updated_at = now()
-            "#
+            "#,
         )
         .bind(&target_type)
         .bind(target_id)
@@ -193,7 +193,7 @@ mod tests {
     fn test_linker_strengthens_existing_edge() {
         let old_weight = 0.5;
         let new_weight = (old_weight + WEIGHT_INCREMENT).min(MAX_WEIGHT);
-        
+
         assert!((new_weight - 0.6).abs() < 0.01);
     }
 
@@ -213,7 +213,7 @@ mod tests {
     fn test_linker_weight_caps_at_max() {
         let old_weight = 0.95;
         let new_weight = (old_weight + WEIGHT_INCREMENT).min(MAX_WEIGHT);
-        
+
         assert!((new_weight - 1.0).abs() < 0.01);
     }
 

@@ -146,6 +146,7 @@ Notes:
 - Scoping filters use camelCase in HTTP JSON: `resourceId`, `threadId`, `agentId`.
 - Filters are optional; omitted filters are not applied.
 - For backward compatibility, snake_case aliases (`resource_id`, `thread_id`, `agent_id`) are also accepted.
+- `threadId`/`thread_id` matching also checks stored `session_id` metadata. This keeps older ingest payloads (that only set `session_id`) queryable via thread scoping.
 
 Response:
 ```json

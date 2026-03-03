@@ -560,7 +560,52 @@ mod tests {
     }
 
     // ========================================================================
-    // TEST 12: ingest_inner — missing content field returns error response
+    // TEST 12: search_inner — embedder init failure returns 500 (not 200)
+    // ========================================================================
+    #[tokio::test]
+    async fn test_search_inner_embedder_init_failure_returns_500() {
+        let (pool, mut config) = match make_state().await {
+            Some(s) => s,
+            None => {
+                eprintln!(
+                    "Skipping test_search_inner_embedder_init_failure_returns_500: DB unavailable"
+                );
+                return;
+            }
+        };
+
+        // Force backend creation to fail deterministically.
+        config.embedding.backend = "onnx".to_string();
+        config.embedding.onnx_model_path = "/tmp/ethos-test-missing-model.onnx".to_string();
+
+        let req = SearchRequest {
+            query: Some("embedder init failure test".to_string()),
+            limit: Some(3),
+            use_spreading: false,
+            min_score: None,
+            resource_id: None,
+            thread_id: None,
+            agent_id: None,
+        };
+
+        let (status, body) = search_inner(&pool, &config, req).await;
+        assert_eq!(
+            status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Embedder initialization failure should return 500"
+        );
+        assert_eq!(body["status"], "error");
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Model not found"),
+            "Expected model-not-found error, got: {body:?}"
+        );
+    }
+
+    // ========================================================================
+    // TEST 13: ingest_inner — missing content field returns error response
     // ========================================================================
     #[tokio::test]
     async fn test_ingest_inner_missing_content() {

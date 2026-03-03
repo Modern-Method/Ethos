@@ -297,7 +297,7 @@ Your agent reads this file automatically as part of their workspace context — 
 
 Scoped recall is supported by optional `/search` filters:
 - `resourceId` (or `resource_id`)
-- `threadId` (or `thread_id`)
+- `threadId` (or `thread_id`; also matches stored `session_id` metadata for backward compatibility)
 - `agentId` (or `agent_id`)
 
 Search results now return:
